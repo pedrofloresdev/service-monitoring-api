@@ -1,12 +1,14 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app.db.session import get_db
-from app.db.models.services import Service
+from app.db.models.metrics import Metric
 
-router = APIRouter(prefix="/metrics", tags=["metrics"])
+NAME = "metrics"
+PREFIX = f"/{NAME}"
+router = APIRouter(prefix=PREFIX, tags=[NAME])
 
 
-@router.get("/{service_id}")
-def get_service(service_id: int, db: Session = Depends(get_db)):
-    service = db.query(Service).filter(Service.id == service_id).first()
+@router.get("/services/{service_id}")
+def get_service_metrics(service_id: int, db: Session = Depends(get_db)):
+    service = db.query(Metric).filter(Metric.service_id == service_id).all()
     return service

@@ -33,8 +33,8 @@ def check_service(service):
 def check_all_services():
     db = SessionLocal()
 
-    services = db.query(Service).filter(Service.is_active is True).all()
-
+    services = db.query(Service).filter(Service.is_active == True).all()
+    print(f"Checking {len(services)} services...")
     for service in services:
         result = check_service(service)
 
