@@ -220,4 +220,4 @@ All settings are loaded from `.env` via `pydantic-settings`.
 
 **Pedro Flores** — Backend Developer (Python · FastAPI · PostgreSQL)
 
-Portfolio: [github.com/flobell](https://github.com/flobell)
+Portfolio: [github.com/pedrofloresdev](https://github.com/pedrofloresdev)
