@@ -12,11 +12,14 @@ router = APIRouter(prefix=PREFIX, tags=[NAME])
 
 @router.post("", response_model=ServiceResponse, status_code=status.HTTP_201_CREATED)
 def create_service(payload: ServiceCreate, db: Session = Depends(get_db)):
-    existing = db.query(Service).filter(Service.url == str(payload.url)).first()
+    normalized_url = str(payload.url)
+    existing = db.query(Service).filter(Service.url == normalized_url).first()
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A service with this URL already exists")
 
-    new_service = Service(**payload.model_dump())
+    data = payload.model_dump()
+    data["url"] = normalized_url
+    new_service = Service(**data)
     db.add(new_service)
     db.commit()
     db.refresh(new_service)
