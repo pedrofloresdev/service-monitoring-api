@@ -1,217 +1,223 @@
-# 🚀 Service Monitoring API
+# Service Monitoring API
 
-A production-ready backend system that monitors external and internal services, tracks uptime, and provides real-time observability using automated health checks and performance metrics.
-
----
-
-## 📌 Overview
-
-**Service Monitoring API** is a backend-focused project designed to simulate a real-world observability system:
-
-* Monitors external and internal APIs automatically
-* Collects and stores performance metrics over time
-* Detects service failures using resilient logic
-* Provides aggregated system health insights
-* Runs in a containerized environment using Docker
-
-This project demonstrates **real-world backend engineering**, including background processing, system monitoring, fault detection, and data aggregation.
+A production-ready backend system that monitors external and internal services, tracks uptime, and delivers real-time observability through automated health checks and performance metrics.
 
 ---
 
-## 🧠 Key Features
+## Overview
 
-### 🔹 Service Monitoring
-
-* Register services (external APIs or internal projects)
-* Configurable health check intervals
-* Supports multiple services simultaneously
+**Service Monitoring API** simulates a real-world observability platform. Register any HTTP endpoint and the system will continuously probe it on its own schedule, record response times, detect failures intelligently, and expose aggregated health data through a clean REST API.
 
 ---
 
-### 🔹 Automated Health Checks
+## Key Features
 
-* Background scheduler using APScheduler
-* Periodic service checks (status + response time)
-* Timeout and error handling
+### Automated Health Checks
+
+- Background scheduler (APScheduler) runs checks per service on its own configurable interval
+- Each check records HTTP status code and response time
+- `httpx` with configurable timeouts — no thread blocking
+
+### Intelligent Status Detection
+
+- Marks a service DOWN only after N consecutive failures (configurable `FAIL_THRESHOLD`)
+- Avoids false positives from transient network blips
+- Status reverts to UP as soon as a successful check is recorded
+
+### Per-Service Scheduling
+
+- Each service has its own `check_interval` (10s – 86400s)
+- Scheduler jobs are created, updated, and removed dynamically as services are registered, updated, or deleted
+
+### Metrics Collection & Aggregation
+
+- Stores response time (`Float` precision) and HTTP status per check
+- Time-range filtering (`?hours=24`) and cursor-style pagination on the metrics endpoint
+- Uptime percentage calculated over the last 24 hours
+
+### Full CRUD for Services
+
+- Register, list, update (partial PATCH), and delete monitored services
+- Deactivating a service (`is_active: false`) removes it from the scheduler without deleting its history
+- Duplicate URL detection with 409 Conflict
+
+### Production-ready Infrastructure
+
+- Docker + Docker Compose with PostgreSQL health-check and proper `depends_on` condition
+- Alembic migrations run automatically on container startup
+- Docker `HEALTHCHECK` on the API container
+- Structured logging across all layers
 
 ---
 
-### 🔹 Metrics Collection
+## Tech Stack
 
-* Stores response time and status for each check
-* Tracks historical performance data
-* Enables time-based analysis (last 24h uptime)
-
----
-
-### 🔹 Intelligent Status Detection
-
-* Avoids false positives using failure thresholds
-* Marks services as DOWN only after consecutive failures
-* Reflects real-world fault tolerance strategies
+| Layer | Technology |
+|---|---|
+| Web framework | FastAPI |
+| Database | PostgreSQL 15 |
+| ORM / migrations | SQLAlchemy 2 + Alembic |
+| HTTP client | httpx |
+| Scheduler | APScheduler 3 |
+| Validation | Pydantic v2 + pydantic-settings |
+| Containerization | Docker + Docker Compose |
 
 ---
 
-### 🔹 Observability Endpoints
-
-* Aggregated system status (`/status`)
-* Historical metrics per service (`/metrics/{service_id}`)
-* Real-time system health insights
-
----
-
-### 🔹 Production Setup
-
-* Fully Dockerized environment
-* Environment-based configuration
-* Modular and scalable architecture
-
----
-
-## 🏗️ Architecture
+## Architecture
 
 ```
 app/
-├── api/ # FastAPI routes (services, metrics, status)
-├── core/ # Database & config
-├── db/ # Database setup, SQLAlchemy models
-├── schemas/ # Pydantic schemas
-├── services/ # Business logic (monitoring, status)
-├── workers/ # Background scheduler (APScheduler)
-└── main.py # Application entry point
+├── api/v1/          # Route handlers (services, metrics, status)
+├── core/            # Settings via pydantic-settings
+├── db/
+│   ├── base.py      # Declarative base
+│   ├── session.py   # Engine + session factory
+│   └── models/      # SQLAlchemy ORM models
+├── schemas/         # Pydantic request / response schemas
+├── services/        # Business logic (monitor, status aggregation)
+├── workers/         # APScheduler lifecycle management
+└── main.py          # App factory + lifespan
 ```
 
 ---
 
-## ⚙️ Tech Stack
+## API Reference
 
-* **FastAPI** – high-performance web framework  
-* **PostgreSQL** – relational database  
-* **SQLAlchemy** – ORM  
-* **APScheduler** – background job scheduling  
-* **Docker** – containerization  
-
----
-
-## 🔌 API Endpoints
+All routes are prefixed with `/api/v1`.
 
 ### Services
 
-```
-POST /services
-GET /services
-```
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/services` | Register a new service |
+| `GET` | `/services` | List all services (`?active_only=true`) |
+| `GET` | `/services/{id}` | Get a single service |
+| `PATCH` | `/services/{id}` | Update service config or toggle active state |
+| `DELETE` | `/services/{id}` | Remove service and its metrics |
 
-* Register and manage monitored services
+**POST /services body:**
+
+```json
+{
+  "name": "My API",
+  "url": "https://api.example.com/health",
+  "expected_status": 200,
+  "check_interval": 60
+}
+```
 
 ---
 
 ### Metrics
 
-```
-GET /metrics/{service_id}
-```
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/metrics/services/{id}` | Paginated metrics for a service |
 
-* Retrieve historical monitoring data for a service
+**Query params:** `limit` (1–1000, default 100) · `offset` · `hours` (restrict to last N hours)
 
 ---
 
 ### Status
 
-```
-GET /status
-```
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/status` | Aggregated health for all active services |
 
-* Get aggregated system health:
-  * Current status (UP/DOWN)
-  * Average response time
-  * Uptime percentage (last 24h)
+**Response:**
+
+```json
+{
+  "total_services": 3,
+  "up": 2,
+  "down": 1,
+  "services": [
+    {
+      "id": 1,
+      "name": "My API",
+      "url": "https://api.example.com/health",
+      "status": "UP",
+      "avg_response_time_ms": 142.5,
+      "uptime_last_24h": 99.31
+    }
+  ]
+}
+```
 
 ---
 
-## 🐳 Running Locally
+### System
 
-### 1. Clone the repository
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Liveness probe |
+| `GET` | `/` | API info |
 
-```
+---
+
+## Running Locally
+
+### With Docker (recommended)
+
+```bash
 git clone https://github.com/flobell/service-monitoring-api.git
 cd service-monitoring-api
+
+cp .env.example .env       # review and adjust if needed
+
+docker compose up --build
 ```
 
-### 2. Configure environment variables
+Migrations run automatically. API is available at `http://localhost:8000`.
 
-```
-cp .env.example .env
-```
-
-### 3. Run with Docker
-
-```
-docker-compose up --build
-```
+Interactive docs: `http://localhost:8000/docs`
 
 ---
 
-### 3. Run manually
+### Without Docker
 
-```
+```bash
+python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
+
+# Set DATABASE_URL in .env, then:
 alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
 ---
 
-## 🌐 Deployment
+## Configuration
 
-The API is deployed on Render: Not Available
-<!-- 
-```
-https://your-api-url.onrender.com
-``` -->
+All settings are loaded from `.env` via `pydantic-settings`.
 
-## 🎯 What This Project Demonstrates
-
-This project highlights:
-
-* Background job processing in backend systems
-* Real-time service monitoring and observability
-* Fault-tolerant system design (failure thresholds)
-* Time-series data collection and aggregation
-* RESTful API design with FastAPI
-* Docker-based development environment
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_URL` | *(required)* | PostgreSQL connection string |
+| `SCHEDULER_INTERVAL_SECONDS` | `60` | Fallback check interval if not set per service |
+| `FAIL_THRESHOLD` | `3` | Consecutive failures before marking a service DOWN |
+| `CHECK_TIMEOUT_SECONDS` | `10` | HTTP request timeout per check |
 
 ---
 
-## 🚀 Future Improvements
+## What This Project Demonstrates
 
-* Per-service scheduling intervals  
-* Alerting system (Slack / Email / Webhooks)  
-* Advanced query optimization (aggregations & indexing)  
-* Caching layer (Redis)  
-* Authentication & multi-tenant support  
-* Dashboard (UI for visualization)  
-
----
-
-## 👨‍💻 Author
-
-**Pedro Flores**  
-Backend Developer (Python | FastAPI | PostgreSQL)
+| Skill | Where |
+|---|---|
+| Background job scheduling | `app/workers/scheduler.py` — per-service APScheduler jobs |
+| Fault-tolerant status logic | `app/services/monitor.py` + `status.py` — failure thresholds |
+| Clean API design | Typed request/response schemas, proper HTTP status codes, 409/404 handling |
+| ORM + migrations | SQLAlchemy 2 models, Alembic versioned migrations |
+| Time-series data | Indexed `checked_at`, time-range queries, uptime aggregation |
+| Resource management | Session lifecycle in background threads, scheduler shutdown on app teardown |
+| Docker best practices | Health checks, `depends_on` conditions, `.dockerignore`, startup scripts |
+| Configuration management | `pydantic-settings` for type-safe, validated env vars |
 
 ---
 
-## ⭐ Why This Matters
+## Author
 
-This is not just another CRUD API.
+**Pedro Flores** — Backend Developer (Python · FastAPI · PostgreSQL)
 
-It is a **production-style observability system** that reflects how real platforms:
-
-* monitor services continuously  
-* detect failures intelligently  
-* analyze performance over time  
-* provide actionable system insights  
-
----
-
-👉 This project is part of my backend engineering portfolio focused on building production-ready systems.
+Portfolio: [github.com/flobell](https://github.com/flobell)

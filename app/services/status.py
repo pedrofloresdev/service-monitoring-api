@@ -4,19 +4,18 @@ from datetime import datetime, timedelta, timezone
 from app.db.models.services import Service
 from app.db.models.metrics import Metric
 from app.services.monitor import get_consecutive_failures
+from app.schemas.status import ServiceStatusEntry, SystemStatus
+from app.core.config import settings
 
-FAIL_THRESHOLD = 3
 
+def get_services_status(db: Session) -> SystemStatus:
+    services = db.query(Service).filter(Service.is_active).order_by(Service.created_at).all()
 
-def get_services_status(db: Session):
-    services = db.query(Service).all()
-
-    result = []
+    entries: list[ServiceStatusEntry] = []
     up_count = 0
     down_count = 0
 
     for service in services:
-        # Última métrica
         last_metric = (
             db.query(Metric)
             .filter(Metric.service_id == service.id)
@@ -28,48 +27,42 @@ def get_services_status(db: Session):
             continue
 
         failures = get_consecutive_failures(db, service.id)
-        status = "DOWN" if failures >= FAIL_THRESHOLD else "UP"
-        # status = last_metric.status
+        status = "DOWN" if failures >= settings.FAIL_THRESHOLD else "UP"
 
         if status == "UP":
             up_count += 1
         else:
             down_count += 1
 
-        # Promedio response time
         avg_response = (
             db.query(func.avg(Metric.response_time_ms))
             .filter(Metric.service_id == service.id)
             .scalar()
-        )
+        ) or 0.0
 
-        # Últimas 24h
-        last_24h = datetime.now(timezone.utc) - timedelta(hours=24)
-
+        since_24h = datetime.now(timezone.utc) - timedelta(hours=24)
         metrics_24h = (
             db.query(Metric)
-            .filter(
-                Metric.service_id == service.id,
-                Metric.checked_at >= last_24h
-            )
+            .filter(Metric.service_id == service.id, Metric.checked_at >= since_24h)
             .all()
         )
 
         total = len(metrics_24h)
-        up = len([m for m in metrics_24h if m.status == "UP"])
+        up_in_24h = sum(1 for m in metrics_24h if m.status == "UP")
+        uptime = round(up_in_24h / total * 100, 2) if total > 0 else 0.0
 
-        uptime = (up / total * 100) if total > 0 else 0
+        entries.append(ServiceStatusEntry(
+            id=service.id,
+            name=service.name,
+            url=service.url,
+            status=status,
+            avg_response_time_ms=round(avg_response, 2),
+            uptime_last_24h=uptime,
+        ))
 
-        result.append({
-            "name": service.name,
-            "status": status,
-            "avg_response_time": int(avg_response or 0),
-            "uptime_last_24h": round(uptime, 2)
-        })
-
-    return {
-        "total_services": len(result),
-        "up": up_count,
-        "down": down_count,
-        "services": result
-    }
+    return SystemStatus(
+        total_services=len(entries),
+        up=up_count,
+        down=down_count,
+        services=entries,
+    )

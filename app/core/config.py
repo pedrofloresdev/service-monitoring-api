@@ -1,10 +1,13 @@
-from dotenv import load_dotenv
-import os
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "")
-SECRET_KEY = os.getenv("SECRET_KEY", "thisisaverysecretkey123")
-ALGORITHM = os.getenv("ALGORITHM", "HS256")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60))
-SCHEDULER_INTERVAL_SECONDS = int(os.getenv("SCHEDULER_INTERVAL_SECONDS", 60))
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    DATABASE_URL: str
+    SCHEDULER_INTERVAL_SECONDS: int = 60
+    FAIL_THRESHOLD: int = 3
+    CHECK_TIMEOUT_SECONDS: int = 10
+
+
+settings = Settings()
