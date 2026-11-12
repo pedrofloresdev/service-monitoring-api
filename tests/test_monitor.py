@@ -5,15 +5,22 @@ in isolation — no real HTTP calls, mocked via httpx.
 """
 
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import httpx
+import pytest
 from sqlalchemy.orm import Session
 
+from app.db.models.metrics import Metric
 from app.db.models.services import Service
-from app.services.monitor import check_service, get_consecutive_failures
-from tests.conftest import make_metric
+from app.services.monitor import check_service, check_service_by_id, get_consecutive_failures
+from app.services.url_safety import (
+    RESOLUTION_FAILED_PREFIX,
+    UNSAFE_LITERAL_MESSAGE,
+    UNSAFE_RESOLVED_MESSAGE,
+)
+from tests.conftest import FakeResolver, make_metric
 
 
 def _fake_service(url: str = "https://example.com/health", expected_status: int = 200) -> Service:
@@ -148,3 +155,112 @@ class TestGetConsecutiveFailures:
             make_metric(db_session, service.id, "DOWN")
         # With limit=3, only checks 3 most recent
         assert get_consecutive_failures(db_session, service.id, limit=3) == 3
+
+
+# ---------------------------------------------------------------------------
+# URL safety at check time (spec 002 RF-6 to RF-9, RF-16)
+# ---------------------------------------------------------------------------
+
+
+def _assert_failed_without_request(result: dict[str, Any], client_cls: MagicMock) -> None:
+    assert result["status"] == "DOWN"
+    assert result["status_code"] is None
+    assert result["response_time_ms"] is None
+    client_cls.assert_not_called()
+
+
+class TestCheckTimeDestination:
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://localhost/",
+            "http://localhost./",
+            "http://localhost../",
+            "http://app.localhost:8000/x",
+            "http://127.0.0.1/",
+            "http://10.0.0.1:8443/",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://[::1]/",
+            "http://[::ffff:7f00:1]/",
+        ],
+    )
+    def test_reserved_name_or_unsafe_literal_is_blocked(
+        self, fake_resolver: FakeResolver, url: str
+    ) -> None:
+        with patch("app.services.monitor.httpx.Client") as client_cls:
+            result = check_service(_fake_service(url=url))
+
+        _assert_failed_without_request(result, client_cls)
+        assert result["error_message"] == UNSAFE_LITERAL_MESSAGE
+        assert fake_resolver.calls == []
+
+    @pytest.mark.parametrize(
+        "addresses", [("10.0.0.5",), ("93.184.216.34", "10.0.0.5"), ("2606:4700::1", "fe80::1")]
+    )
+    def test_hostname_resolving_to_non_public_is_blocked(
+        self, fake_resolver: FakeResolver, addresses: tuple[str, ...]
+    ) -> None:
+        fake_resolver.set("internal.test", *addresses)
+
+        with patch("app.services.monitor.httpx.Client") as client_cls:
+            result = check_service(_fake_service(url="https://internal.test/health"))
+
+        _assert_failed_without_request(result, client_cls)
+        assert result["error_message"] == UNSAFE_RESOLVED_MESSAGE
+        assert fake_resolver.calls == ["internal.test"]
+
+    @pytest.mark.parametrize("error", ["name not found", "timed out", "lookup failed"])
+    def test_unresolvable_hostname_fails_without_request(
+        self, fake_resolver: FakeResolver, error: str
+    ) -> None:
+        fake_resolver.set("gone.test", error=error)
+
+        with patch("app.services.monitor.httpx.Client") as client_cls:
+            result = check_service(_fake_service(url="https://gone.test/"))
+
+        _assert_failed_without_request(result, client_cls)
+        assert result["error_message"] == f"{RESOLUTION_FAILED_PREFIX} gone.test: {error}"
+
+    def test_hostname_that_turns_private_is_blocked_at_the_next_check(
+        self, fake_resolver: FakeResolver
+    ) -> None:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        service = _fake_service(url="https://rebind.test/")
+
+        with patch("app.services.monitor.httpx.Client") as client_cls:
+            client_cls.return_value.__enter__.return_value.get.return_value = mock_response
+            first = check_service(service)
+            fake_resolver.set("rebind.test", "127.0.0.1")
+            second = check_service(service)
+
+        assert first["status"] == "UP"
+        assert second["status"] == "DOWN"
+        assert second["error_message"] == UNSAFE_RESOLVED_MESSAGE
+        assert client_cls.call_count == 1
+
+    def test_stored_unsafe_service_is_kept_and_its_check_is_blocked(
+        self, db_session: Session
+    ) -> None:
+        svc = Service(
+            name="Legacy", url="http://localhost/", expected_status=200, check_interval=60
+        )
+        db_session.add(svc)
+        db_session.commit()
+        earlier = make_metric(db_session, svc.id, "UP")
+        service_id, earlier_id = svc.id, earlier.id
+
+        with (
+            patch("app.services.monitor.SessionLocal", return_value=db_session),
+            patch("app.services.monitor.httpx.Client") as client_cls,
+        ):
+            check_service_by_id(service_id)
+
+        client_cls.assert_not_called()
+        stored = db_session.get(Service, service_id)
+        assert stored is not None
+        assert (stored.url, stored.is_active) == ("http://localhost/", True)
+        metrics = db_session.query(Metric).filter(Metric.service_id == service_id).all()
+        assert [m.id for m in metrics if m.id == earlier_id] == [earlier_id]
+        latest = max(metrics, key=lambda m: m.id)
+        assert (latest.status, latest.error_message) == ("DOWN", UNSAFE_LITERAL_MESSAGE)
