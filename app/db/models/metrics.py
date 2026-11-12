@@ -19,7 +19,7 @@ class Metric(Base):
     service_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("services.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    status: Mapped[str] = mapped_column(String(8), nullable=False)  # THROWAWAY drift: no migration (second push)
+    status: Mapped[str] = mapped_column(String(8), nullable=False)  # THROWAWAY drift
     status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     response_time_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     error_message: Mapped[str | None] = mapped_column(String, nullable=True)
