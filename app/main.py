@@ -1,5 +1,4 @@
 import logging
-import os  # THROWAWAY: deliberate unused import (F401) to prove only the lint check fails
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
