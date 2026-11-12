@@ -8,7 +8,7 @@ A small, reliable uptime monitor exposed as a REST API: register endpoints, chec
 - Recruiters/reviewers evaluating the codebase as a portfolio project.
 
 ## Main flows
-1. Register a service (name, URL, expected status code, check interval); it is scheduled immediately.
+1. Register a service (name, URL, expected status code, check interval); it is scheduled immediately. URLs that point to non-public addresses are rejected.
 2. The scheduler checks each active service at its interval and stores a metric (status, status code, response time, error).
 3. Query a service's metrics, paginated and optionally limited to the last N hours.
 4. Get aggregated status for all active services: UP/DOWN (after N consecutive failures), average response time, 24h uptime.
@@ -19,6 +19,7 @@ A small, reliable uptime monitor exposed as a REST API: register endpoints, chec
 - Docker compose setup with Postgres and automatic migrations.
 - Quality baseline (spec 000): ruff lint/format, strict mypy, 71 pytest tests with an 88% coverage floor, GitHub Actions CI.
 - Migration history verified against the models on PostgreSQL in CI (spec 001).
+- URL safety (spec 002): service URLs pointing to non-public addresses (loopback, private, link-local/cloud metadata, reserved ranges, `localhost`) are rejected with 422 on create/update, and every check validates the destination again (DNS rebinding) and connects only to validated public addresses; blocked checks are stored as DOWN with a fixed reason. Details in `docs/architecture.md` §6.
 
 ## Out of scope
 - Authentication/multi-tenant accounts, alerting/notifications, UI dashboard, non-HTTP checks (TCP, DNS), distributed workers.

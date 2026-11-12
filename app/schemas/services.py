@@ -14,6 +14,15 @@ from pydantic_core import PydanticCustomError
 
 from app.services.url_safety import NOT_ALLOWED_MESSAGE, HostClass, classify_host
 
+URL_DESCRIPTION = (
+    "http(s) URL to check. Must point to a public address: loopback, private, link-local "
+    "(including cloud metadata 169.254.169.254), reserved and other non-public IPv4/IPv6 "
+    "ranges, and localhost / *.localhost are rejected with 422 (type url_not_allowed). "
+    "Hostnames are resolved on create/update and again before every check; a check whose "
+    "destination is unsafe or does not resolve is stored as DOWN without sending a request. "
+    "Checks do not follow redirects or use proxies."
+)
+
 
 class _ServiceUrlInput(BaseModel):
     """URL safety checks shared by create and update requests (spec 002).
@@ -49,14 +58,14 @@ class _ServiceUrlInput(BaseModel):
 
 class ServiceCreate(_ServiceUrlInput):
     name: str = Field(..., min_length=1, max_length=100)
-    url: HttpUrl
+    url: HttpUrl = Field(..., description=URL_DESCRIPTION)
     expected_status: int = Field(default=200, ge=100, le=599)
     check_interval: int = Field(default=60, ge=10, le=86400, description="Interval in seconds")
 
 
 class ServiceUpdate(_ServiceUrlInput):
     name: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    url: Optional[HttpUrl] = None
+    url: Optional[HttpUrl] = Field(default=None, description=URL_DESCRIPTION)
     expected_status: Optional[int] = Field(default=None, ge=100, le=599)
     check_interval: Optional[int] = Field(default=None, ge=10, le=86400)
     is_active: Optional[bool] = None
