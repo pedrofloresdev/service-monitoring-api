@@ -51,7 +51,7 @@ REST API that registers HTTP services, checks them on a per-service schedule, st
 - 🚫 Never: implement what is not in the spec, commit secrets (`.env`), skip failing tests, advance an SDD phase without approval.
 
 ## Verification
-- `ruff check .`, `ruff format --check .`, `mypy` and `pytest` all green (coverage at or above the floor, no regression). CI runs the same four checks on every PR.
+- `ruff check .`, `ruff format --check .`, `mypy` and `pytest` all green (coverage at or above the floor, no regression). With PostgreSQL available, also `python -m tools.schema_check` and `pytest -m postgres --no-cov`. CI runs all five checks (`lint`, `format`, `typecheck`, `test`, `migrations`) on every PR.
 - Manual: `docker compose up --build`, then `GET /health` and `GET /api/v1/status` respond; state what was verified.
 
 ## Memory

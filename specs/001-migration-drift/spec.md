@@ -1,6 +1,6 @@
 # 001 - Migration drift
 
-Status: approved (2026-11-12)
+Status: implemented (2026-11-12; validated: SPEC FULFILLED)
 Resolves: spec 000, Open question OQ-1. Must be implemented before spec 000 is signed off.
 
 ## Context and goal

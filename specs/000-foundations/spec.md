@@ -1,6 +1,6 @@
 # 000 - Foundations
 
-Status: approved
+Status: implemented (2026-11-12; validated, RF-6 to confirm on the first push to `master`)
 
 ## Context and goal
 The Service Monitoring API works (v1.0, 50 passing tests, ~88% coverage) but has no automated quality gate: no linting, no formatting standard, no type checking, and no continuous integration. Nothing stops a change that breaks tests, lowers coverage or adds untyped code from reaching the default branch. The example environment file is also out of date: it lists settings the app never reads and misses settings it does read.

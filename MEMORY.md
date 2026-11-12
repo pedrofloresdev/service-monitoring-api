@@ -3,9 +3,9 @@
 ## Current state
 - v1.0 works: service CRUD (`/api/v1/services`), paginated metrics with time filter (`/api/v1/metrics/services/{id}`), aggregated status (`/api/v1/status`), `/health` liveness.
 - Architecture: FastAPI routes -> services layer -> SQLAlchemy 2 sync models on PostgreSQL. APScheduler BackgroundScheduler runs one interval job per active service, started/stopped in the FastAPI lifespan. A service is DOWN after `FAIL_THRESHOLD` consecutive failed checks.
-- Tests: 50 pytest tests, ~88% coverage, in-memory SQLite, scheduler mocked.
-- Known gaps: transitive dependencies not locked, test suite never runs against Postgres (roadmap 004), no authentication, no metrics retention, obsolete `version:` key in docker-compose.yml. (Lint/format/type check, CI and `.env.example` are fixed by 000 on `feature/000-foundations`, not merged yet.)
-- Known gap (constitution P3): default `check_interval` is hardcoded `60` in schema and model; `SCHEDULER_INTERVAL_SECONDS` is declared but never read (to be removed in 000). Roadmap candidate: make the default interval a setting.
+- Tests: 71 default tests (in-memory SQLite, scheduler mocked, coverage 88.41%, floor 88) plus 12 `postgres`-marked tests (migrations + endpoints on PostgreSQL, run with `TEST_POSTGRES_URL`).
+- Known gaps: transitive dependencies not locked, the default test suite does not run on Postgres (only migrations + endpoint checks do; full parity is roadmap 004), no authentication, no metrics retention, obsolete `version:` key in docker-compose.yml.
+- Known gap (constitution P3): default `check_interval` is hardcoded `60` in schema and model (the unused `SCHEDULER_INTERVAL_SECONDS` was removed in 000). Roadmap candidate: make the default interval a setting.
 - Known gap (constitution P7): hardcoded Postgres credentials in docker-compose.yml. Not an approved exception; future spec.
 - Spec 000-foundations: approved 2026-11-12 after two `/sdd-clarify` passes. Plan approved 2026-11-12.
 - 000 baseline (Python 3.11.18, master): 50 tests, 281/319 statements = 88.09% -> coverage floor 88 (`fail_under=88`, `precision=2`). Margin is thin: one new uncovered statement fails the gate.

@@ -19,6 +19,8 @@ All measured on 2026-11-12 against unmodified `master` code, in a throwaway Pyth
 | Prototype (scratch copy only): typed `DeclarativeBase` + `Mapped[...]` models, route return annotations | Postgres DDL **byte-identical**. OpenAPI JSON **byte-identical**. 50 tests pass. Only 7 trivial mypy errors left in `app/`. |
 | Prototype variant: `root()`/`health()` annotated `-> dict[str, str]` *without* `response_model=None` | OpenAPI **changes** (adds an object schema for both routes). This confirms the spec edge case, and `response_model=None` is required. |
 
+> **As built (2026-11-12):** CI is implemented as one matrix job (`check`, `fail-fast: false`, `name: ${{ matrix.check }}`) instead of four copy-pasted jobs. The behavior is the same: four independent jobs with separate named statuses, and one failing never stops the others (verified on run 43309663530). Spec 001 later added a fifth job, `migrations`.
+
 ## 2. Approach
 
 Five independent pieces, each mapped to RFs:

@@ -17,7 +17,8 @@ A small, reliable uptime monitor exposed as a REST API: register endpoints, chec
 ## Current scope
 - Service CRUD, per-service scheduling, metrics storage and query, aggregated status, liveness endpoint.
 - Docker compose setup with Postgres and automatic migrations.
-- 50 pytest tests (~88% coverage).
+- Quality baseline (spec 000): ruff lint/format, strict mypy, 71 pytest tests with an 88% coverage floor, GitHub Actions CI.
+- Migration history verified against the models on PostgreSQL in CI (spec 001).
 
 ## Out of scope
 - Authentication/multi-tenant accounts, alerting/notifications, UI dashboard, non-HTTP checks (TCP, DNS), distributed workers.
