@@ -1,20 +1,46 @@
 """Compare the schema built by the migration history with the schema the models declare.
 
-Spec 001 RF-7. The pure functions here normalize SQLAlchemy inspector output into a
-SchemaSnapshot and diff two snapshots. Constraint and index names are ignored on purpose:
-only structure (columns, uniqueness, foreign-key target and delete rule) is compared.
+Spec 001 RF-7. Usage:
+
+    TEST_POSTGRES_URL=postgresql://postgres:postgres@localhost:5432/postgres \\
+        python -m tools.schema_check
+
+It creates two disposable databases on that server: one migrated with `alembic upgrade head`,
+one built with `Base.metadata.create_all`. It compares them and drops both. Exit codes:
+0 = no differences, 1 = differences (or the migration failed), 2 = setup problem.
+
+The pure functions normalize SQLAlchemy inspector output into a SchemaSnapshot and diff two
+snapshots. Constraint and index names are ignored on purpose: only structure (columns,
+uniqueness, foreign-key target and delete rule) is compared.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import os
+import secrets
+import subprocess
+import sys
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol
 
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.dialects.postgresql.base import PGDialect
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.types import TypeEngine
 
 IGNORED_TABLES = frozenset({"alembic_version"})
+REPO_ROOT = Path(__file__).resolve().parent.parent
+ENV_VAR = "TEST_POSTGRES_URL"
+SETUP_HELP = f"""\
+{ENV_VAR} must point to a PostgreSQL server where databases can be created and dropped.
+Start one locally with:
+    cp .env.example .env   # if you have no .env yet (docker compose needs it)
+    docker compose up -d db
+    export {ENV_VAR}=postgresql://postgres:postgres@localhost:5432/postgres"""
 
 
 @dataclass(frozen=True)
@@ -183,3 +209,95 @@ def format_differences(diffs: Sequence[str]) -> str:
     lines = [f"{len(diffs)} schema difference(s) between the migration history and the models:"]
     lines += [f"  - {d}" for d in diffs]
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# I/O: disposable databases, Alembic, entry point
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def temporary_database(admin_url: str, prefix: str) -> Iterator[str]:
+    """Create a uniquely named database and always drop it on exit. Yields its URL."""
+    name = f"{prefix}_{secrets.token_hex(4)}"
+    admin = create_engine(admin_url, isolation_level="AUTOCOMMIT")
+    try:
+        with admin.connect() as conn:
+            conn.execute(text(f'CREATE DATABASE "{name}"'))
+        try:
+            yield make_url(admin_url).set(database=name).render_as_string(hide_password=False)
+        finally:
+            with admin.connect() as conn:
+                conn.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+    finally:
+        admin.dispose()
+
+
+def run_alembic(args: Sequence[str], database_url: str) -> subprocess.CompletedProcess[str]:
+    """Run Alembic in a subprocess against `database_url` (migrations/env.py reads DATABASE_URL)."""
+    return subprocess.run(
+        [sys.executable, "-m", "alembic", *args],
+        cwd=REPO_ROOT,
+        env={**os.environ, "DATABASE_URL": database_url},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def snapshot_database(database_url: str) -> SchemaSnapshot:
+    engine = create_engine(database_url)
+    try:
+        return snapshot_from_inspector(inspect(engine))
+    finally:
+        engine.dispose()
+
+
+def build_model_schema(database_url: str) -> None:
+    # Imported here so the pure functions above stay importable without the app.
+    import app.db.models.metrics  # noqa: F401
+    import app.db.models.services  # noqa: F401
+    from app.db.base import Base
+
+    engine = create_engine(database_url)
+    try:
+        Base.metadata.create_all(engine)
+    finally:
+        engine.dispose()
+
+
+def main() -> int:
+    admin_url = os.environ.get(ENV_VAR)
+    if not admin_url:
+        print(SETUP_HELP, file=sys.stderr)
+        return 2
+    try:
+        engine = create_engine(admin_url)
+        with engine.connect():
+            pass
+        engine.dispose()
+    except SQLAlchemyError as exc:
+        print(
+            f"Cannot connect to {ENV_VAR}: {exc.__class__.__name__}\n\n{SETUP_HELP}",
+            file=sys.stderr,
+        )
+        return 2
+
+    with (
+        temporary_database(admin_url, "schema_check_migrated") as migrated_url,
+        temporary_database(admin_url, "schema_check_models") as models_url,
+    ):
+        result = run_alembic(["upgrade", "head"], migrated_url)
+        if result.returncode != 0:
+            print("alembic upgrade head failed on an empty database:", file=sys.stderr)
+            print(result.stdout + result.stderr, file=sys.stderr)
+            return 1
+        build_model_schema(models_url)
+        diffs = diff_schemas(snapshot_database(migrated_url), snapshot_database(models_url))
+
+    print(format_differences(diffs))
+    return 1 if diffs else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

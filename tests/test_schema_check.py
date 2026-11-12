@@ -5,6 +5,7 @@ Pure logic only: no PostgreSQL needed. Inspector data is faked.
 
 from typing import Any
 
+import pytest
 from sqlalchemy import TIMESTAMP, VARCHAR, Boolean, Integer
 from sqlalchemy.types import TypeEngine
 
@@ -15,6 +16,7 @@ from tools.schema_check import (
     TableInfo,
     diff_schemas,
     format_differences,
+    main,
     normalize_type,
     snapshot_from_inspector,
 )
@@ -309,3 +311,26 @@ class TestFormatDifferences:
 
 def test_boolean_type_normalizes() -> None:
     assert normalize_type(Boolean()) == "BOOLEAN"
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point (setup errors only; the PostgreSQL path is covered in tests/postgres)
+# ---------------------------------------------------------------------------
+
+
+class TestMain:
+    def test_exits_2_with_instructions_when_url_missing(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.delenv("TEST_POSTGRES_URL", raising=False)
+        assert main() == 2
+        err = capsys.readouterr().err
+        assert "TEST_POSTGRES_URL" in err
+        assert "docker compose up -d db" in err
+
+    def test_exits_2_when_server_unreachable(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setenv("TEST_POSTGRES_URL", "postgresql://u:p@127.0.0.1:1/postgres")
+        assert main() == 2
+        assert "Cannot connect" in capsys.readouterr().err

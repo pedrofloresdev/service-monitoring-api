@@ -21,7 +21,7 @@ Rules for every task:
     - They cover: VARCHAR vs VARCHAR(4), timestamp with vs without time zone, nullability, default, missing and extra tables and columns, FK delete rule, index uniqueness, name-insensitive constraints, and deterministic order.
     - The spec 000 checks are green.
 
-- [ ] **T2. Schema check command.** Add `temporary_database` (unique name, `DROP ... WITH (FORCE)` in `finally`), `run_alembic` (subprocess, repo-root cwd, `DATABASE_URL` env) and `main()` with exit codes 0, 1 and 2. Make it runnable as `python -m tools.schema_check`. RF-7
+- [x] **T2. Schema check command.** Add `temporary_database` (unique name, `DROP ... WITH (FORCE)` in `finally`), `run_alembic` (subprocess, repo-root cwd, `DATABASE_URL` env) and `main()` with exit codes 0, 1 and 2. Make it runnable as `python -m tools.schema_check`. RF-7
   - Done when:
     - Without `TEST_POSTGRES_URL`, the command exits 2 and prints how to start a local PG.
     - On local PG with the current history, it exits 1 and lists exactly the 7 known differences: `metrics.checked_at` nullable, `metrics.checked_at` default, `metrics.status` type, `metrics.status` nullable, and `services.expected_status`, `check_interval` and `is_active` nullable.
