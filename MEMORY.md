@@ -35,6 +35,5 @@
 - FastAPI uses route return annotations as response models: typing routes without `response_model` can silently change OpenAPI.
 
 ## Next steps
-- Owner: confirm the Mermaid diagrams in `docs/architecture.md` render on GitHub (000 T8, the only unchecked task).
 - Run `/sdd-validate 001-migration-drift` and `/sdd-validate 000-foundations`; then mark PR #1 ready and merge it to `master` (owner).
 - After merge: confirm the push-to-master CI run (000 RF-6) and mark the 5 checks as required in branch protection (manual, owner).

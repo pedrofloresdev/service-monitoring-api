@@ -77,7 +77,7 @@ Rules for every task:
     - After pushing the branch and opening a PR to `master` (owner confirms the push first), the PR shows `CI / lint`, `CI / format`, `CI / typecheck` and `CI / test` all green.
     - The run takes under 5 minutes.
 
-- [ ] **T8. Architecture document.** Create `docs/architecture.md` with the sections in plan §8.2, including the Mermaid component and sequence diagrams, the status rules, the settings table and the known gap about the fixed check interval. RF-12
+- [x] **T8. Architecture document.** Create `docs/architecture.md` with the sections in plan §8.2, including the Mermaid component and sequence diagrams, the status rules, the settings table and the known gap about the fixed check interval. RF-12
   - Done when:
     - Each item in the §8.2 checklist is confirmed against the code, with the file and line noted while checking.
     - Both Mermaid diagrams render on GitHub in the PR file view.

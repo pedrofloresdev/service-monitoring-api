@@ -1,6 +1,6 @@
 # 000 - Foundations: validation notes
 
-Status: evidence complete (2026-11-12). OQ-1 fixed by spec 001 (merged into this branch via PR #2). Only open item: owner visual check that the Mermaid diagrams render on GitHub (T8). Ready for `/sdd-validate`.
+Status: evidence complete (2026-11-12). OQ-1 fixed by spec 001 (merged into this branch via PR #2). All tasks done. Ready for `/sdd-validate`.
 Branch: `feature/000-foundations`. Environment: Python 3.11.18 venv from `requirements-dev.txt`, Docker 29.2.1 / Compose v2.40.3 (WSL).
 
 ## Completion criteria
@@ -14,7 +14,7 @@ Branch: `feature/000-foundations`. Environment: Python 3.11.18 venv from `requir
 | CI after spec 001 merged: all checks green | PASS | PR #1 run 43309568403 on `aad8751`: `lint`, `format`, `typecheck`, `test`, `migrations` all pass; whole run 42 s. |
 | `.env.example` matches exactly the settings the app and migration runner read; unused interval setting gone | PASS | Keys `CHECK_TIMEOUT_SECONDS DATABASE_URL FAIL_THRESHOLD` = `Settings.model_fields`; `migrations/env.py` reads only `DATABASE_URL`; `grep SCHEDULER_INTERVAL_SECONDS` matches only `specs/` and `MEMORY.md` |
 | Production image does not contain the dev tools | PASS | `docker compose run --rm --no-deps api pip show pytest pytest-cov` → "WARNING: Package(s) not found: pytest, pytest-cov" |
-| Architecture doc exists, linked from README, matches the code; docs list the real commands | PASS (owner to confirm Mermaid renders on GitHub) | `docs/architecture.md`; rules re-checked against `app/services/status.py`, `app/services/monitor.py`, `app/workers/scheduler.py`, APScheduler `IntervalTrigger` start date. AGENTS.md/README commands all exit 0 as written. |
+| Architecture doc exists, linked from README, matches the code; docs list the real commands | PASS | `docs/architecture.md`; both Mermaid diagrams confirmed rendering on GitHub by the owner (2026-11-12); rules re-checked against `app/services/status.py`, `app/services/monitor.py`, `app/workers/scheduler.py`, APScheduler `IntervalTrigger` start date. AGENTS.md/README commands all exit 0 as written. |
 | RNF-1 (a) OpenAPI byte-identical | PASS | Sorted-key JSON from `app.openapi()`, master worktree vs branch, same venv: identical (743 lines) |
 | RNF-1 (b) DDL identical, no new migration | PASS | Postgres-dialect `CREATE TABLE`/`CREATE INDEX` plus per-column Python and server defaults: identical (40 lines). `git diff master -- migrations/` empty. |
 | RNF-1 (c) 50 tests pass, edits mechanical/annotation-only | PASS | `pytest --collect-only -qq`: same 50 node ids as master. `tests/` diff: only imports, signatures, `cast()` in `_fake_service`, formatting. |
