@@ -16,7 +16,7 @@ Every "Done when" also implies the quality gates are green: `ruff check .`, `ruf
   - `RESOLUTION_TIMEOUT_SECONDS` (float, default 2.0, `> 0`, `<= 30`) in settings and `.env.example`. `resolve_host(host, timeout, getaddrinfo=...)` returning `Resolution` (plan A1). Autouse `fake_resolver` fixture in `tests/conftest.py` returning a public address for any hostname.
   - Done when: settings tests show `"abc"`, `0`, `-1`, `30.5` raise `ValidationError` and `0.1`, `30` and the default 2.0 are accepted; resolver tests with an injected `getaddrinfo` pass for both families, partial answer (IPv6 error), IPv6 slower than the deadline (returns within deadline + 0.3 s with the IPv4 addresses), both slow ("timed out"), both `gaierror` ("name not found"), duplicates removed, IPv4-first order.
 
-- [ ] **T4. Request-validation rejection (no DNS).** RF-1, RF-2, RF-5 (schema part)
+- [x] **T4. Request-validation rejection (no DNS).** RF-1, RF-2, RF-5 (schema part)
   - `url` field validator on `ServiceCreate` and `ServiceUpdate` using `classify_host`; raw submitted URL kept in a private attribute (plan A2, D8).
   - Done when: `POST` and `PATCH` with each reserved name and each unsafe literal from the RNF-6 "rejected" list return 422 with the exact entry (`type` `url_not_allowed`, `loc` `["body","url"]`, exact `msg`, `input` = submitted string, no `ctx`); a reserved URL with an empty `name` returns one 422 with both entries; a reserved URL on an unknown service id returns 422 (not 404); public mapped/compatible/NAT64 literals are accepted; no row is created or changed and `schedule_service` is not called on rejection.
 
