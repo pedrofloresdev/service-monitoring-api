@@ -27,7 +27,7 @@ Rules for every task:
     - `git diff` contains only whitespace and wrapping, import order, the 2 removed imports and the trailing newline.
     - `git diff -- migrations/` is empty.
 
-- [ ] **T3. Typed persistence models.** In `app/db/base.py`, replace `declarative_base()` with `class Base(DeclarativeBase)`. Convert `Service` and `Metric` to `Mapped[...] = mapped_column(...)`, keeping every positional and keyword argument. Type the relationships, with cross-model imports under `TYPE_CHECKING`. RF-3, RNF-1b
+- [x] **T3. Typed persistence models.** In `app/db/base.py`, replace `declarative_base()` with `class Base(DeclarativeBase)`. Convert `Service` and `Metric` to `Mapped[...] = mapped_column(...)`, keeping every positional and keyword argument. Type the relationships, with cross-model imports under `TYPE_CHECKING`. RF-3, RNF-1b
   - Done when:
     - The snapshot vs master shows the Postgres DDL and the per-column Python-side and server defaults byte-identical.
     - No file is added under `migrations/versions/`.
