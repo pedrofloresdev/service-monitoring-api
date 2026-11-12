@@ -10,7 +10,7 @@ Rules for every task:
 
 ## Tasks
 
-- [ ] **T1. Schema diff logic, test first.** Make these changes:
+- [x] **T1. Schema diff logic, test first.** Make these changes:
   - Write `tests/test_schema_check.py` first (plan §10 RF-7 list).
   - Then add `tools/__init__.py` and the pure functions in `tools/schema_check.py`: `normalize_type`, `snapshot_from_inspector` working on inspector-shaped data, `diff_schemas`, `format_differences`, and the frozen `SchemaSnapshot`.
   - Add `"tools"` to the mypy `files` list and to the isort `known-first-party` list in `pyproject.toml`.
