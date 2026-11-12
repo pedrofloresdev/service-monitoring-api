@@ -346,3 +346,20 @@ def test_conftest_fake_resolver_replaces_the_module_resolver(fake_resolver: Fake
     )
     assert url_safety.resolve_host("private.test", 1.0) == Resolution(_addresses("10.0.0.1"), None)
     assert fake_resolver.calls == ["any.test", "private.test"]
+
+
+@pytest.mark.parametrize("host", [None, "8.8.8.8", "localhost", "[::1]"])
+def test_registration_check_does_not_resolve_non_hostnames(
+    fake_resolver: FakeResolver, host: str | None
+) -> None:
+    url_safety.ensure_registration_allowed(host, "http://x/")
+    assert fake_resolver.calls == []
+
+
+def test_registration_check_raises_with_the_submitted_url(fake_resolver: FakeResolver) -> None:
+    fake_resolver.set("internal.test", "10.0.0.5")
+    with pytest.raises(url_safety.UnsafeDestinationError) as caught:
+        url_safety.ensure_registration_allowed("Internal.Test", "http://Internal.Test/")
+    assert caught.value.submitted_url == "http://Internal.Test/"
+    assert str(caught.value) == url_safety.NOT_ALLOWED_MESSAGE
+    assert fake_resolver.calls == ["internal.test"]

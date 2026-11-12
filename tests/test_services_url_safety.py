@@ -1,5 +1,7 @@
 """URL safety on POST/PATCH /api/v1/services (spec 002 RF-1 to RF-5, RNF-4)."""
 
+import threading
+import time
 from typing import Any
 from unittest.mock import patch
 
@@ -7,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.models.services import Service
 from app.services.url_safety import NOT_ALLOWED_MESSAGE
 from tests.conftest import FakeResolver
@@ -120,3 +123,140 @@ class TestAcceptedLiterals:
         # `url: null` is a pre-existing gap (spec 002 Out of scope); the validator skips None.
         resp = client.patch(f"{BASE}/9999", json={"name": "x", "url": None})
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Hostname resolution after request validation (RF-3, RF-4, RF-5)
+# ---------------------------------------------------------------------------
+
+
+def _store(db_session: Session, url: str) -> Service:
+    svc = Service(name="Stored", url=url, expected_status=200, check_interval=60, is_active=True)
+    db_session.add(svc)
+    db_session.commit()
+    db_session.refresh(svc)
+    return svc
+
+
+class TestHostnameCheck:
+    @pytest.mark.parametrize(
+        "addresses", [("10.0.0.5",), ("93.184.216.34", "10.0.0.5"), ("2606:4700::1", "fd00::5")]
+    )
+    def test_create_with_hostname_resolving_to_non_public_is_rejected(
+        self,
+        client: TestClient,
+        db_session: Session,
+        fake_resolver: FakeResolver,
+        addresses: tuple[str, ...],
+    ) -> None:
+        fake_resolver.set("internal.test", *addresses)
+        submitted = "http://Internal.TEST/status"
+
+        with patch("app.api.v1.services.schedule_service") as schedule:
+            resp = client.post(BASE, json=_payload(submitted))
+
+        assert resp.status_code == 422
+        assert resp.json() == {"detail": [_url_error(submitted)]}
+        assert fake_resolver.calls == ["internal.test"]
+        assert db_session.query(Service).count() == 0
+        schedule.assert_not_called()
+        for address in addresses:
+            assert address not in resp.text  # RF-15
+
+    @pytest.mark.parametrize("error", ["name not found", "timed out", "lookup failed"])
+    def test_unresolvable_hostname_is_accepted(
+        self, client: TestClient, fake_resolver: FakeResolver, error: str
+    ) -> None:
+        fake_resolver.set("not-yet-live.test", error=error)
+        resp = client.post(BASE, json=_payload("https://not-yet-live.test/"))
+        assert resp.status_code == 201
+
+    def test_public_hostname_is_accepted(
+        self, client: TestClient, fake_resolver: FakeResolver
+    ) -> None:
+        resp = client.post(BASE, json=_payload("https://api.example.com/health"))
+        assert resp.status_code == 201
+        assert fake_resolver.calls == ["api.example.com"]
+
+    def test_unknown_service_wins_over_hostname_check(
+        self, client: TestClient, fake_resolver: FakeResolver
+    ) -> None:
+        fake_resolver.set("internal.test", "10.0.0.5")
+        resp = client.patch(f"{BASE}/9999", json={"url": "http://internal.test/"})
+        assert resp.status_code == 404
+        assert fake_resolver.calls == []
+
+    def test_hostname_check_wins_over_duplicate(
+        self, client: TestClient, db_session: Session, fake_resolver: FakeResolver
+    ) -> None:
+        _store(db_session, "http://internal.test/")
+        fake_resolver.set("internal.test", "10.0.0.5")
+        resp = client.post(BASE, json=_payload("http://internal.test/"))
+        assert resp.status_code == 422
+
+    def test_update_resending_stored_unsafe_url_is_rejected(
+        self, client: TestClient, db_session: Session, fake_resolver: FakeResolver
+    ) -> None:
+        svc = _store(db_session, "http://internal.test/")
+        fake_resolver.set("internal.test", "10.0.0.5")
+
+        with patch("app.api.v1.services.schedule_service") as schedule:
+            resp = client.patch(
+                f"{BASE}/{svc.id}", json={"name": "Renamed", "url": "http://internal.test/"}
+            )
+
+        assert resp.status_code == 422
+        db_session.refresh(svc)
+        assert svc.name == "Stored"
+        schedule.assert_not_called()
+
+    def test_update_without_url_on_unsafe_service_is_allowed(
+        self, client: TestClient, db_session: Session, fake_resolver: FakeResolver
+    ) -> None:
+        svc = _store(db_session, "http://internal.test/")
+        fake_resolver.set("internal.test", "10.0.0.5")
+
+        resp = client.patch(f"{BASE}/{svc.id}", json={"name": "Renamed"})
+
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "Renamed"
+        assert fake_resolver.calls == []
+
+    def test_update_with_unchanged_url_is_validated_again(
+        self, client: TestClient, service: Service, fake_resolver: FakeResolver
+    ) -> None:
+        resp = client.patch(f"{BASE}/{service.id}", json={"url": service.url})
+        assert resp.status_code == 200
+        assert fake_resolver.calls == ["example.com"]
+
+
+# ---------------------------------------------------------------------------
+# RNF-4: a slow resolution never stalls the rest of the API
+# ---------------------------------------------------------------------------
+
+
+def test_slow_resolution_does_not_block_other_requests(
+    client: TestClient, fake_resolver: FakeResolver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "RESOLUTION_TIMEOUT_SECONDS", 1.0)
+    fake_resolver.delay = 1.0
+    started = threading.Event()
+    statuses: list[int] = []
+
+    def slow_create() -> None:
+        started.set()
+        statuses.append(client.post(BASE, json=_payload("https://slow-dns.test/")).status_code)
+
+    worker = threading.Thread(target=slow_create)
+    worker.start()
+    started.wait()
+    time.sleep(0.1)  # let the create reach the resolver
+
+    for path in ("/health", "/api/v1/status"):
+        start = time.monotonic()
+        assert client.get(path).status_code == 200
+        assert time.monotonic() - start < 0.5
+
+    assert worker.is_alive()  # the slow create was still resolving during both requests
+    worker.join()
+    assert statuses == [201]

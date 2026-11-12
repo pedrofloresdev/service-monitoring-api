@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.db.models.services import Service
 from app.db.session import get_db
 from app.schemas.services import ServiceCreate, ServiceResponse, ServiceUpdate
+from app.services.url_safety import ensure_registration_allowed
 from app.workers.scheduler import schedule_service, unschedule_service
 
 NAME = "services"
@@ -13,6 +14,8 @@ router = APIRouter(prefix=PREFIX, tags=[NAME])
 
 @router.post("", response_model=ServiceResponse, status_code=status.HTTP_201_CREATED)
 def create_service(payload: ServiceCreate, db: Session = Depends(get_db)) -> Service:
+    # Before the duplicate check: an unsafe URL is a 422 even if it already exists (spec 002).
+    ensure_registration_allowed(payload.url.host, payload.submitted_url)
     normalized_url = str(payload.url)
     existing = db.query(Service).filter(Service.url == normalized_url).first()
     if existing:
@@ -56,6 +59,9 @@ def update_service(
 
     updates = payload.model_dump(exclude_unset=True)
     if "url" in updates:
+        # Validated even when equal to the stored URL; nothing is written before (spec 002).
+        if payload.url is not None:
+            ensure_registration_allowed(payload.url.host, payload.submitted_url)
         updates["url"] = str(updates["url"])
 
     for field, value in updates.items():

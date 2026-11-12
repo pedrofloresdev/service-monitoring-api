@@ -15,6 +15,8 @@ from enum import Enum
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_address
 from typing import Any
 
+from app.core.config import settings
+
 IPAddress = IPv4Address | IPv6Address
 GetAddrInfo = Callable[..., list[tuple[Any, ...]]]
 
@@ -187,3 +189,29 @@ def _failure_reason(answers: dict[int, Any], expected: int) -> str:
     ):
         return "name not found"
     return "lookup failed"
+
+
+# ---------------------------------------------------------------------------
+# Registration (create/update) check
+# ---------------------------------------------------------------------------
+
+
+class UnsafeDestinationError(Exception):
+    """A create/update URL whose hostname resolves to a non-public address (RF-3)."""
+
+    def __init__(self, submitted_url: str) -> None:
+        super().__init__(NOT_ALLOWED_MESSAGE)
+        self.submitted_url = submitted_url
+
+
+def ensure_registration_allowed(host: str | None, submitted_url: str) -> None:
+    """Resolve a hostname and reject it if any address is non-public (RF-3, RF-4).
+
+    Reserved names and literals were already handled during request validation (RF-2).
+    An unresolvable hostname is accepted: every check validates it again.
+    """
+    if host is None or classify_host(host) is not HostClass.HOSTNAME:
+        return
+    resolution = resolve_host(normalize_host(host), settings.RESOLUTION_TIMEOUT_SECONDS)
+    if any(not is_public_address(address) for address in resolution.addresses):
+        raise UnsafeDestinationError(submitted_url)
