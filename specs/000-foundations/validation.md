@@ -1,6 +1,6 @@
 # 000 - Foundations: validation notes
 
-Status: in progress (local evidence collected; GitHub evidence pending; blocked by OQ-1)
+Status: in progress (PR checks verified; throwaway-PR and cancellation checks pending; sign-off blocked until spec 001 resolves OQ-1)
 Branch: `feature/000-foundations`. Environment: Python 3.11.18 venv from `requirements-dev.txt`, Docker 29.2.1 / Compose v2.40.3 (WSL).
 
 ## Completion criteria
@@ -8,7 +8,7 @@ Branch: `feature/000-foundations`. Environment: Python 3.11.18 venv from `requir
 | Criterion | Result | Evidence |
 |---|---|---|
 | Lint, format check, strict type check, tests (coverage ≥ floor) pass locally with the documented commands | PASS | `ruff check .` → "All checks passed!"; `ruff format --check .` → "50 files already formatted"; `mypy` → "Success: no issues found in 30 source files"; `pytest` → 50 passed, "Required test coverage of 88.0% reached. Total coverage: 88.41%" |
-| PR to `master` shows each check as a separate passing status, run < 5 min | PENDING | Needs push (owner approval). Workflow validated locally: YAML parses, actionlint 1.7.7 clean, no `secrets.`/`DATABASE_URL`. |
+| PR to `master` shows each check as a separate passing status, run < 5 min | PASS | PR #1 (draft), run 43287075723 (`pull_request`): `lint` 14s, `format` 28s, `typecheck` 22s, `test` 19s, all pass; whole run 32s (19:08:29 to 19:09:01 UTC). Workflow also actionlint 1.7.7 clean, no `secrets.`/`DATABASE_URL`. |
 | Throwaway PR with a lint error: only `lint` fails, others complete; closed unmerged | PENDING | Needs push (owner approval) |
 | `.env.example` matches exactly the settings the app and migration runner read; unused interval setting gone | PASS | Keys `CHECK_TIMEOUT_SECONDS DATABASE_URL FAIL_THRESHOLD` = `Settings.model_fields`; `migrations/env.py` reads only `DATABASE_URL`; `grep SCHEDULER_INTERVAL_SECONDS` matches only `specs/` and `MEMORY.md` |
 | Production image does not contain the dev tools | PASS | `docker compose run --rm --no-deps api pip show pytest pytest-cov` → "WARNING: Package(s) not found: pytest, pytest-cov" |

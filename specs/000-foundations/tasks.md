@@ -70,7 +70,7 @@ Rules for every task:
     - `mypy`, `ruff check .` and `ruff format --check .` exit 0.
     - `pytest` is green with coverage ≥ 88%.
 
-- [ ] **T7. CI workflow.** Create `.github/workflows/ci.yml` per plan §4.3: triggers, `permissions: contents: read`, concurrency with cancel for PRs only, and four independent jobs `lint`, `format`, `typecheck`, `test`. Each job uses Python 3.11 with pip cache and installs `requirements-dev.txt`. Actions are pinned to commit SHAs. No secrets and no `DATABASE_URL`. RF-5, RF-6, RF-7, RF-8, RF-9, RNF-3, RNF-4
+- [x] **T7. CI workflow.** Create `.github/workflows/ci.yml` per plan §4.3: triggers, `permissions: contents: read`, concurrency with cancel for PRs only, and four independent jobs `lint`, `format`, `typecheck`, `test`. Each job uses Python 3.11 with pip cache and installs `requirements-dev.txt`. Actions are pinned to commit SHAs. No secrets and no `DATABASE_URL`. RF-5, RF-6, RF-7, RF-8, RF-9, RNF-3, RNF-4
   - Done when:
     - The file parses as YAML.
     - It contains no `secrets.` reference and no `DATABASE_URL`.
