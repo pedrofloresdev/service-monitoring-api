@@ -4,7 +4,7 @@
 - v1.0 works: service CRUD (`/api/v1/services`), paginated metrics with time filter (`/api/v1/metrics/services/{id}`), aggregated status (`/api/v1/status`), `/health` liveness.
 - Architecture: FastAPI routes -> services layer -> SQLAlchemy 2 sync models on PostgreSQL. APScheduler BackgroundScheduler runs one interval job per active service, started/stopped in the FastAPI lifespan. A service is DOWN after `FAIL_THRESHOLD` consecutive failed checks.
 - Tests: 50 pytest tests, ~88% coverage, in-memory SQLite, scheduler mocked.
-- Known gaps: no linter/formatter, no type checker, no CI, no pyproject.toml, dependencies not locked, tests never run against Postgres, `.env.example` lists unused vars (SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES) and misses FAIL_THRESHOLD / CHECK_TIMEOUT_SECONDS, no authentication, no metrics retention, obsolete `version:` key in docker-compose.yml.
+- Known gaps: transitive dependencies not locked, test suite never runs against Postgres (roadmap 004), no authentication, no metrics retention, obsolete `version:` key in docker-compose.yml. (Lint/format/type check, CI and `.env.example` are fixed by 000 on `feature/000-foundations`, not merged yet.)
 - Known gap (constitution P3): default `check_interval` is hardcoded `60` in schema and model; `SCHEDULER_INTERVAL_SECONDS` is declared but never read (to be removed in 000). Roadmap candidate: make the default interval a setting.
 - Known gap (constitution P7): hardcoded Postgres credentials in docker-compose.yml. Not an approved exception; future spec.
 - Spec 000-foundations: approved 2026-11-12 after two `/sdd-clarify` passes. Plan approved 2026-11-12.
@@ -20,8 +20,11 @@
 - 000 plan decisions: ruff 0.17.2 (lint+format, line length 100 keeps query chains intact) and mypy 2.4.1 strict + pydantic plugin, both approved as new dev deps; `requirements-dev.txt` includes `requirements.txt`; typed `DeclarativeBase` + `Mapped[...]` models (prototype: identical DDL); `response_model=None` on `root()`/`health()` (without it OpenAPI changes); four independent CI jobs `CI / lint|format|typecheck|test`; equivalence check run ad hoc, not committed.
 - 000 "no behavior change" is proven by: identical sorted-JSON OpenAPI snapshot, identical Postgres-dialect DDL from models, 50 tests unchanged in what they assert, manual compose run. Scheduler/session/check/timestamp/status code gets only mechanical + annotation-only changes.
 
-- 000 implementation (2026-11-12, branch `feature/000-foundations`): T1-T6, T9 done; T7 (CI) and T8 (architecture doc) committed but await GitHub verification (push needs owner approval); T10 local evidence in `specs/000-foundations/validation.md`.
-- BLOCKER OQ-1 (pre-existing on master): migrations never set `metrics.checked_at` server default / NOT NULL, so on Postgres every metric has `checked_at = NULL` -> metrics endpoint 500, uptime always 0.0. Also drift: `metrics.status` nullable VARCHAR, `services.expected_status/check_interval/is_active` nullable. Needs a new Alembic revision (forbidden in 000). Owner decides via `/sdd-change`.
+- 000 implementation (2026-11-12, branch `feature/000-foundations`, draft PR #1): T1-T7, T9 done (CI green on PR #1: 4 checks, run 32s). T8 waits for the Mermaid render check on GitHub. T10: local evidence in `specs/000-foundations/validation.md`; throwaway broken-lint PR and cancellation check still pending; sign-off blocked until 001 lands.
+- 000 OQ-1 (pre-existing on master): migrations never set `metrics.checked_at` server default / NOT NULL, so on Postgres every metric has `checked_at = NULL` -> metrics endpoint 500, uptime always 0.0. Owner decision: fix in spec 001 before 000 sign-off.
+- Spec 001-migration-drift approved 2026-11-12 (branch `feature/001-migration-drift`, stacked on `feature/000-foundations`). Measured drift (migrated PG15 vs models): `metrics.checked_at` nullable + no default, `metrics.status` nullable + VARCHAR (model String(4)), `services.expected_status/check_interval/is_active` nullable. Alembic `compare_metadata` with `compare_type=True` did NOT flag the VARCHAR length difference, so the RF-7 check needs more than plain autogenerate compare.
+- 001 owner decision (OQ-1 option a): the new migration DELETES legacy metrics (NULL `checked_at`) and reports the count. This is an approved one-time exception to constitution P1, limited to those rows. NULL service config columns get the model defaults; NULL or over-long `metrics.status` aborts the migration (never invent or truncate health data).
+- Roadmap renumbered 2026-11-12: 001 migration-drift, 002 metrics-retention, 003 alerting, 004 postgres-test-parity, 005 api-auth.
 
 ## Lessons / mistakes to avoid
 - Tests build tables with `create_all` from the models, so migration-vs-model drift is invisible to pytest; only a real `alembic upgrade head` on Postgres (compose) reveals it. Always smoke-test the write path end to end, not only `/health`.
@@ -29,4 +32,5 @@
 - FastAPI uses route return annotations as response models: typing routes without `response_model` can silently change OpenAPI.
 
 ## Next steps
-- Implement 000-foundations T1..T10 on branch `feature/000-foundations` (tasks approved 2026-11-12).
+- Run `/sdd-plan 001-migration-drift` (then tasks, implement), on `feature/001-migration-drift`.
+- Then finish 000: T8 Mermaid render check, T10 throwaway broken-lint PR and cancellation check, re-run the compose smoke test, `/sdd-validate 000-foundations`.
