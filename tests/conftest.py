@@ -3,28 +3,30 @@ import os
 # Must be set before any app module is imported so pydantic-settings picks it up.
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
-import pytest  # noqa: E402
+from collections.abc import Iterator  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
 from unittest.mock import patch  # noqa: E402
 
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import create_engine  # noqa: E402
+from sqlalchemy.orm import Session as OrmSession  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
 
-from app.main import app  # noqa: E402
 from app.db.base import Base  # noqa: E402
-from app.db.session import get_db  # noqa: E402
-from app.db.models.services import Service  # noqa: E402
 from app.db.models.metrics import Metric  # noqa: E402
-
+from app.db.models.services import Service  # noqa: E402
+from app.db.session import get_db  # noqa: E402
+from app.main import app  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # DB fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
-def db_session():
+def db_session() -> Iterator[OrmSession]:
     """Fresh in-memory SQLite database per test — no shared state."""
     engine = create_engine(
         "sqlite:///:memory:",
@@ -45,10 +47,12 @@ def db_session():
 # HTTP client fixture
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
-def client(db_session):
+def client(db_session: OrmSession) -> Iterator[TestClient]:
     """TestClient wired to the in-memory DB with scheduler ops mocked out."""
-    def override_get_db():
+
+    def override_get_db() -> Iterator[OrmSession]:
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
@@ -69,8 +73,9 @@ def client(db_session):
 # Sample data fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
-def service(db_session) -> Service:
+def service(db_session: OrmSession) -> Service:
     svc = Service(
         name="Test API",
         url="https://example.com/health",
@@ -84,7 +89,9 @@ def service(db_session) -> Service:
     return svc
 
 
-def make_metric(db_session, service_id: int, status: str, response_time_ms: float = 100.0) -> Metric:
+def make_metric(
+    db_session: OrmSession, service_id: int, status: str, response_time_ms: float = 100.0
+) -> Metric:
     metric = Metric(
         service_id=service_id,
         status=status,

@@ -1,8 +1,10 @@
 import logging
+
 from apscheduler.schedulers.background import BackgroundScheduler
-from app.services.monitor import check_service_by_id
-from app.db.session import SessionLocal
+
 from app.db.models.services import Service
+from app.db.session import SessionLocal
+from app.services.monitor import check_service_by_id
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +24,9 @@ def schedule_service(service: Service) -> None:
         args=[service.id],
         replace_existing=True,
     )
-    logger.info("Scheduled service %d (%s) every %ds", service.id, service.name, service.check_interval)
+    logger.info(
+        "Scheduled service %d (%s) every %ds", service.id, service.name, service.check_interval
+    )
 
 
 def unschedule_service(service_id: int) -> None:

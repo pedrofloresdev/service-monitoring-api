@@ -8,7 +8,3 @@ pydantic-settings==2.9.1
 python-dotenv==1.2.2
 SQLAlchemy==2.0.48
 uvicorn==0.42.0
-
-# Testing
-pytest==8.3.5
-pytest-cov==6.1.0

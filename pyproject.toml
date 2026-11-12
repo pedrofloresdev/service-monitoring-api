@@ -1,0 +1,43 @@
+# Tool configuration only. Dependencies live in requirements.txt / requirements-dev.txt.
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["migrations"]
+
+[tool.ruff.lint]
+# E/W: pycodestyle (incl. E711 `== None`, E722 bare except, E9 syntax errors)
+# F: pyflakes (undefined names, unused imports/variables)
+# I: import ordering
+# B: bugbear (incl. B006 mutable default arguments)
+select = ["E", "W", "F", "I", "B"]
+# Line length is owned by the formatter.
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "tests", "tools"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI dependency-injection and parameter declarations are meant to be call defaults.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["app", "tests", "tools"]
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+# APScheduler 3.x ships no type information.
+module = ["apscheduler.*"]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["app"]
+
+[tool.coverage.report]
+# Floor = integer part of the measured baseline (88.09% on 2026-11-12, spec 000).
+fail_under = 88
+# Compare with two decimals so e.g. 87.6% fails instead of rounding up to 88.
+precision = 2
+exclude_also = ["if TYPE_CHECKING:"]

@@ -1,11 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from app.db.session import get_db
-from app.db.models.services import Service
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session
+
 from app.db.models.metrics import Metric
-from app.schemas.metrics import MetricResponse, MetricsPage
+from app.db.models.services import Service
+from app.db.session import get_db
+from app.schemas.metrics import MetricsPage
 
 NAME = "metrics"
 PREFIX = f"/{NAME}"
@@ -17,9 +19,11 @@ def get_service_metrics(
     service_id: int,
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
-    hours: Optional[int] = Query(default=None, ge=1, le=8760, description="Restrict to last N hours"),
+    hours: Optional[int] = Query(
+        default=None, ge=1, le=8760, description="Restrict to last N hours"
+    ),
     db: Session = Depends(get_db),
-):
+) -> MetricsPage:
     service = db.query(Service).filter(Service.id == service_id).first()
     if not service:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")

@@ -80,6 +80,8 @@ app/
 └── main.py          # App factory + lifespan
 ```
 
+For how a health check flows from the scheduler to a stored metric, and how UP/DOWN, average response time and uptime are derived, see [docs/architecture.md](docs/architecture.md).
+
 ---
 
 ## API Reference
@@ -179,25 +181,74 @@ Interactive docs: `http://localhost:8000/docs`
 
 ```bash
 python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt               # runtime deps + dev tools (Python 3.11)
 
-# Set DATABASE_URL in .env, then:
+cp .env.example .env    # then set DATABASE_URL to your PostgreSQL
 alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
 ---
 
+## Quality Checks
+
+Tool configuration lives in `pyproject.toml`. Install the dev tools with `pip install -r requirements-dev.txt`, then:
+
+| Check | Command |
+|---|---|
+| Lint | `ruff check .` |
+| Format | `ruff format .` (check only: `ruff format --check .`) |
+| Type check | `mypy` (strict mode, `app/`, `tests/` and `tools/`) |
+| Tests + coverage floor | `pytest` (fails if coverage of `app/` drops below the floor in `pyproject.toml`) |
+
+### PostgreSQL checks (migrations)
+
+The default test suite runs on in-memory SQLite. Two extra checks need a real PostgreSQL server, given as an admin URL where databases can be created and dropped:
+
+```bash
+cp .env.example .env    # if you have no .env yet (docker compose needs it)
+docker compose up -d db
+export TEST_POSTGRES_URL=postgresql://postgres:postgres@localhost:5432/postgres
+
+python -m tools.schema_check     # migration history vs models: exit 0 = identical, 1 = differences
+pytest -m postgres --no-cov      # migration behavior and endpoints on the migrated schema
+```
+
+`TEST_POSTGRES_URL` is a tooling variable, not an app setting. Without it, both commands fail with these instructions instead of passing silently.
+
+### Continuous integration
+
+GitHub Actions (`.github/workflows/ci.yml`) runs five independent jobs on every pull request to `master` and on every push to `master`. Each job reports its own status: `lint`, `format`, `typecheck`, `test` and `migrations`. The `migrations` job runs the PostgreSQL checks against a disposable PostgreSQL 15 container. To block merges while a check fails, mark these five as required status checks in the repository's branch protection settings for `master`.
+
+### How changes are made
+
+Every change follows Spec-Driven Development: an approved spec in `specs/NNN-name/`, then a plan, small tasks, test-first implementation and a validation report with evidence. See [docs/workflow-guide.md](docs/workflow-guide.md).
+
+### Upgrading an existing database
+
+Migration `a62134b6f191` (spec 001) fixes a bug where checks were stored without a timestamp on PostgreSQL. It **deletes** those legacy metrics, because their real time is unknown and they could not be shown, and logs how many it deleted (`Deleted N legacy metric(s) with NULL checked_at`). Back up the database before running `alembic upgrade head`. If any metric has an empty or invalid status, the migration stops without changing anything.
+
+---
+
 ## Configuration
 
-All settings are loaded from `.env` via `pydantic-settings`.
+All settings are loaded from `.env` via `pydantic-settings`. `.env.example` lists exactly these.
 
 | Variable | Default | Description |
 |---|---|---|
 | `DATABASE_URL` | *(required)* | PostgreSQL connection string |
-| `SCHEDULER_INTERVAL_SECONDS` | `60` | Fallback check interval if not set per service |
 | `FAIL_THRESHOLD` | `3` | Consecutive failures before marking a service DOWN |
 | `CHECK_TIMEOUT_SECONDS` | `10` | HTTP request timeout per check |
+
+The default `check_interval` for a new service (60 seconds) is fixed in code, not a setting; each service can set its own interval (10–86400 seconds).
+
+**Container-only variables** (not read by the application, so not in `.env.example`):
+
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `8000` | Port uvicorn listens on inside the API container (used by the Dockerfile `CMD` and `HEALTHCHECK`) |
+
+With `docker compose`, the API container's `DATABASE_URL` is set in `docker-compose.yml` and overrides the value from `.env`.
 
 ---
 
