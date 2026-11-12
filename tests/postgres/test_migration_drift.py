@@ -102,13 +102,21 @@ def test_legacy_metrics_deleted_and_counted(
     make_database: MakeDatabase, alembic: AlembicRunner
 ) -> None:
     url = _seeded_pre_001_database(make_database, alembic)
+    valid_query = (
+        "SELECT id, service_id, status, status_code, response_time_ms, checked_at "
+        "FROM metrics WHERE checked_at IS NOT NULL ORDER BY id"
+    )
+    valid_before = _rows(url, valid_query)
 
     result = alembic(url, "upgrade", "head")
 
     assert result.returncode == 0, result.output
     assert "Deleted 3 legacy metric(s) with NULL checked_at" in result.output
-    assert _scalar(url, "SELECT count(*) FROM metrics") == 2
     assert _scalar(url, "SELECT count(*) FROM metrics WHERE checked_at IS NULL") == 0
+    # The valid checks survive untouched: same ids and values, including timestamps.
+    assert len(valid_before) == 2
+    assert _rows(url, valid_query) == valid_before
+    assert _model_snapshot_diff(make_database, url) == []
 
 
 def test_zero_legacy_metrics_reports_zero(
