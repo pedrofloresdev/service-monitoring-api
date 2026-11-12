@@ -8,7 +8,7 @@ Every "Done when" also implies the quality gates are green: `ruff check .`, `ruf
   - Autouse `network_guard` fixture in `tests/conftest.py` (skipped for `postgres`-marked tests): DNS lookups of anything but loopback literals and connections to non-loopback addresses raise.
   - Done when: a new test shows `socket.getaddrinfo("example.com")` and a connect to `198.51.100.1:80` both raise under the guard, a connect to a loopback listener still works, and the existing default suite passes unchanged (same test count plus the new ones).
 
-- [ ] **T2. Address and host classification (pure).** RF-2, RF-6, RF-7, RF-8 (definitions: blocked range table, embedded-IPv4 forms, reserved name, literal host)
+- [x] **T2. Address and host classification (pure).** RF-2, RF-6, RF-7, RF-8 (definitions: blocked range table, embedded-IPv4 forms, reserved name, literal host)
   - New `app/services/url_safety.py`: the IPv4/IPv6 tables, `embedded_ipv4`, `is_public_address`, `normalize_host`, `is_reserved_name`, `parse_literal`, `classify_host`, the four fixed messages/prefix as constants. Tests first in `tests/test_url_safety.py`.
   - Done when: parametrized tests pass for every table row (an address inside each block, and a public neighbour where meaningful), mapped/compatible/NAT64 forms of a private and a public IPv4, `::` and `::1`, a 6to4, a Teredo and a `64:ff9b:1::1` address, `localhost` / `LOCALHOST.` / `localhost..` / `app.localhost` (reserved) and `localhost.example.com` (not reserved), and each `classify_host` outcome; the module has no I/O imports.
 
