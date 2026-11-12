@@ -20,7 +20,11 @@
 - 000 plan decisions: ruff 0.17.2 (lint+format, line length 100 keeps query chains intact) and mypy 2.4.1 strict + pydantic plugin, both approved as new dev deps; `requirements-dev.txt` includes `requirements.txt`; typed `DeclarativeBase` + `Mapped[...]` models (prototype: identical DDL); `response_model=None` on `root()`/`health()` (without it OpenAPI changes); four independent CI jobs `CI / lint|format|typecheck|test`; equivalence check run ad hoc, not committed.
 - 000 "no behavior change" is proven by: identical sorted-JSON OpenAPI snapshot, identical Postgres-dialect DDL from models, 50 tests unchanged in what they assert, manual compose run. Scheduler/session/check/timestamp/status code gets only mechanical + annotation-only changes.
 
+- 000 implementation (2026-11-12, branch `feature/000-foundations`): T1-T6, T9 done; T7 (CI) and T8 (architecture doc) committed but await GitHub verification (push needs owner approval); T10 local evidence in `specs/000-foundations/validation.md`.
+- BLOCKER OQ-1 (pre-existing on master): migrations never set `metrics.checked_at` server default / NOT NULL, so on Postgres every metric has `checked_at = NULL` -> metrics endpoint 500, uptime always 0.0. Also drift: `metrics.status` nullable VARCHAR, `services.expected_status/check_interval/is_active` nullable. Needs a new Alembic revision (forbidden in 000). Owner decides via `/sdd-change`.
+
 ## Lessons / mistakes to avoid
+- Tests build tables with `create_all` from the models, so migration-vs-model drift is invisible to pytest; only a real `alembic upgrade head` on Postgres (compose) reveals it. Always smoke-test the write path end to end, not only `/health`.
 - Formatter/linter edits touch every file: a spec that restricts sensitive areas to "annotation-only" must also allow mechanical (format/import) changes, or it is impossible to satisfy.
 - FastAPI uses route return annotations as response models: typing routes without `response_model` can silently change OpenAPI.
 
