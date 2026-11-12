@@ -220,6 +220,10 @@ pytest -m postgres --no-cov      # migration behavior and endpoints on the migra
 
 GitHub Actions (`.github/workflows/ci.yml`) runs five independent jobs on every pull request to `master` and on every push to `master`. Each job reports its own status: `lint`, `format`, `typecheck`, `test` and `migrations`. The `migrations` job runs the PostgreSQL checks against a disposable PostgreSQL 15 container. To block merges while a check fails, mark these five as required status checks in the repository's branch protection settings for `master`.
 
+### How changes are made
+
+Every change follows Spec-Driven Development: an approved spec in `specs/NNN-name/`, then a plan, small tasks, test-first implementation and a validation report with evidence. See [docs/workflow-guide.md](docs/workflow-guide.md).
+
 ### Upgrading an existing database
 
 Migration `a62134b6f191` (spec 001) fixes a bug where checks were stored without a timestamp on PostgreSQL. It **deletes** those legacy metrics, because their real time is unknown and they could not be shown, and logs how many it deleted (`Deleted N legacy metric(s) with NULL checked_at`). Back up the database before running `alembic upgrade head`. If any metric has an empty or invalid status, the migration stops without changing anything.

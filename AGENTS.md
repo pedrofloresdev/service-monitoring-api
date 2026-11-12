@@ -18,8 +18,8 @@ REST API that registers HTTP services, checks them on a per-service schedule, st
 - `app/workers/scheduler.py` - scheduler lifecycle and per-service jobs
 - `migrations/versions/` - Alembic revisions
 - `tests/` - pytest, one file per area; `conftest.py` provides in-memory SQLite and mocks the scheduler
-- `docs/` - constitution, product SPEC, architecture
-- `specs/NNN-name/` - spec.md, plan.md, tasks.md per feature
+- `docs/` - constitution, product SPEC, architecture, SDD workflow guide
+- `specs/NNN-name/` - spec.md, plan.md, tasks.md, validation.md per feature
 
 ## Commands
 - Setup: `pip install -r requirements-dev.txt` (Python 3.11)
@@ -58,4 +58,4 @@ REST API that registers HTTP services, checks them on a per-service schedule, st
 Read MEMORY.md at the start of every session. Update it at the end of each SDD phase.
 
 ## Workflow (SDD)
-Constitution -> Spec -> Clarify -> Plan -> Tasks -> Implement ONE task -> Validate. Never advance a phase without explicit user approval. Commands: `/sdd-spec`, `/sdd-clarify`, `/sdd-plan`, `/sdd-tasks`, `/sdd-implement`, `/sdd-validate`, `/sdd-change`, `/sdd-status`.
+Constitution -> Spec -> Clarify -> Plan -> Tasks -> Implement ONE task -> Validate. Never advance a phase without explicit user approval. Commands: `/sdd-spec`, `/sdd-clarify`, `/sdd-plan`, `/sdd-tasks`, `/sdd-implement`, `/sdd-validate`, `/sdd-change`, `/sdd-status`. Walkthrough with worked examples (specs 000 and 001): `docs/workflow-guide.md`.
