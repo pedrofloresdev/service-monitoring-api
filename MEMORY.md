@@ -9,7 +9,7 @@
 - Known gap (constitution P7): hardcoded Postgres credentials in docker-compose.yml. Not an approved exception; future spec.
 - Spec 000-foundations: approved 2026-11-12 after two `/sdd-clarify` passes. Plan approved 2026-11-12.
 - 000 baseline (Python 3.11.18, master): 50 tests, 281/319 statements = 88.09% -> coverage floor 88 (`fail_under=88`, `precision=2`). Margin is thin: one new uncovered statement fails the gate.
-- Docker is not reachable from this WSL distro: manual compose checks (RNF-1d, RNF-5) must be run by the owner or after enabling WSL integration.
+- Docker is reachable from WSL (Docker Desktop integration enabled 2026-11-12; server 29.2.1, Compose v2.40.3), so compose checks (RNF-1d, RNF-5) can run here.
 
 ## Decisions and why
 - Per-service scheduler jobs instead of one global loop: each service has its own `check_interval`.
@@ -25,4 +25,4 @@
 - FastAPI uses route return annotations as response models: typing routes without `response_model` can silently change OpenAPI.
 
 ## Next steps
-- Run `/sdd-tasks 000-foundations`.
+- Implement 000-foundations T1..T10 on branch `feature/000-foundations` (tasks approved 2026-11-12).
