@@ -363,3 +363,24 @@ def test_registration_check_raises_with_the_submitted_url(fake_resolver: FakeRes
     assert caught.value.submitted_url == "http://Internal.Test/"
     assert str(caught.value) == url_safety.NOT_ALLOWED_MESSAGE
     assert fake_resolver.calls == ["internal.test"]
+
+
+# ---------------------------------------------------------------------------
+# Redaction (spec 002 RF-15)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("connect to 93.184.216.34 failed", "connect to example.test failed"),
+        ("not valid for '93.184.216.34'", "not valid for 'example.test'"),
+        ("https://[2606:4700::1]:443/ refused", "https://[example.test]:443/ refused"),
+        ("2606:4700::1 unreachable", "example.test unreachable"),
+        ("93.184.216.3 and 93.184.216.34", "example.test and example.test"),
+        ("no address here", "no address here"),
+    ],
+)
+def test_redact_replaces_resolved_addresses_with_the_hostname(message: str, expected: str) -> None:
+    addresses = ["93.184.216.3", "93.184.216.34", "2606:4700::1"]
+    assert url_safety.redact(message, addresses, "example.test") == expected

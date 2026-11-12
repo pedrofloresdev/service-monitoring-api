@@ -95,6 +95,8 @@ def _send(
 
 def check_service(service: Service) -> dict[str, Any]:
     start = time.monotonic()  # response time includes resolution, as before (RNF-1)
+    host = ""
+    destination = _Destination()
     try:
         url = httpx.URL(str(service.url))
         host = url_safety.normalize_host(url.raw_host.decode("ascii"))
@@ -120,7 +122,9 @@ def check_service(service: Service) -> dict[str, Any]:
             "error_message": None,
         }
     except Exception as exc:
-        return _failed(str(exc))
+        # Library messages can contain the connected IP; never store it (RF-15).
+        addresses = [str(address) for address in destination.addresses]
+        return _failed(url_safety.redact(str(exc), addresses, host))
 
 
 def check_service_by_id(service_id: int) -> None:

@@ -6,10 +6,11 @@ it disagrees with the spec (embedded-IPv4 forms, NAT64, the "whole block" rule).
 """
 
 import queue
+import re
 import socket
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_address
@@ -114,6 +115,18 @@ def classify_host(host: str) -> HostClass:
     if literal is None:
         return HostClass.HOSTNAME
     return HostClass.PUBLIC_LITERAL if is_public_address(literal) else HostClass.UNSAFE_LITERAL
+
+
+def redact(message: str, addresses: Sequence[str], host: str) -> str:
+    """Replace every resolved address in an error message by the hostname (RF-15).
+
+    Matches whole addresses only, so `93.184.216.3` never rewrites part of `93.184.216.35`.
+    """
+    for address in sorted(addresses, key=len, reverse=True):
+        after = r"(?![0-9.])" if ":" not in address else r"(?![0-9A-Fa-f:])"
+        pattern = r"(?<![0-9A-Fa-f.:])" + re.escape(address) + after
+        message = re.sub(pattern, host, message)
+    return message
 
 
 # ---------------------------------------------------------------------------

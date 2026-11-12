@@ -4,8 +4,15 @@ Tests check_service (HTTP logic) and get_consecutive_failures (DB logic)
 in isolation — no real HTTP calls, mocked via httpx.
 """
 
+import ipaddress
 import ssl
+import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
@@ -17,6 +24,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.models.metrics import Metric
 from app.db.models.services import Service
+from app.services import url_safety
 from app.services.monitor import check_service, check_service_by_id, get_consecutive_failures
 from app.services.url_safety import (
     RESOLUTION_FAILED_PREFIX,
@@ -399,3 +407,129 @@ class TestPinnedSend:
             result = check_service(_fake_service())
 
         assert result["response_time_ms"] >= 200
+
+
+# ---------------------------------------------------------------------------
+# Redaction and real loopback servers (spec 002 RF-11, RF-13, RF-14, RF-15)
+# ---------------------------------------------------------------------------
+
+TLS_DIR = Path(__file__).parent / "fixtures" / "tls"
+LOOPBACK = "127.0.0.1"
+
+
+def test_error_messages_never_contain_resolved_addresses(fake_resolver: FakeResolver) -> None:
+    fake_resolver.set("multi.test", "93.184.216.34", "2606:4700::1")
+    with patch("app.services.monitor.httpx.Client") as client_cls:
+        client_cls.return_value.__enter__.return_value.get.side_effect = httpx.ReadError(
+            "peer 93.184.216.34 reset, also tried [2606:4700::1]"
+        )
+        result = check_service(_fake_service(url="https://multi.test/"))
+
+    assert result["error_message"] == "peer multi.test reset, also tried [multi.test]"
+
+
+@dataclass
+class Seen:
+    requests: list[tuple[str, str | None]] = field(default_factory=list)  # (path, Host)
+    sni: list[str | None] = field(default_factory=list)
+
+
+@contextmanager
+def loopback_server(
+    status: int, location: str | None = None, tls: bool = False
+) -> Iterator[tuple[int, Seen]]:
+    seen = Seen()
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            seen.requests.append((self.path, self.headers.get("Host")))
+            self.send_response(status)
+            if location:
+                self.send_header("Location", location)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, format: str, *args: Any) -> None:
+            pass
+
+    server = HTTPServer((LOOPBACK, 0), Handler)
+    if tls:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(TLS_DIR / "monitor-test.crt", TLS_DIR / "monitor-test.key")
+
+        def record_sni(sock: ssl.SSLObject, name: str | None, ctx: ssl.SSLContext) -> None:
+            seen.sni.append(name)
+
+        context.sni_callback = record_sni
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server.server_address[1], seen
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.fixture
+def loopback_counts_as_public(
+    fake_resolver: FakeResolver, monkeypatch: pytest.MonkeyPatch
+) -> FakeResolver:
+    """Test seam: let `*.test` names resolve to loopback and treat loopback as public.
+
+    Real servers can only run on loopback here, which the spec blocks; this lets the
+    tests exercise the real HTTP/TLS path without weakening the production rule.
+    """
+    real_is_public = url_safety.is_public_address
+    loopback = ipaddress.ip_address(LOOPBACK)
+    monkeypatch.setattr(
+        url_safety, "is_public_address", lambda a: a == loopback or real_is_public(a)
+    )
+    for name in ("monitor.test", "other.test"):
+        fake_resolver.set(name, LOOPBACK)
+    return fake_resolver
+
+
+@pytest.mark.usefixtures("loopback_counts_as_public")
+class TestLoopbackChecks:
+    def test_redirect_to_private_address_is_not_followed(self) -> None:
+        with loopback_server(302, location="http://127.0.0.1/secret") as (port, seen):
+            result = check_service(_fake_service(url=f"http://monitor.test:{port}/start"))
+
+        assert (result["status"], result["status_code"]) == ("DOWN", 302)
+        assert seen.requests == [("/start", f"monitor.test:{port}")]
+
+    def test_environment_proxies_are_ignored(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "all_proxy"):
+            monkeypatch.setenv(name, "http://198.51.100.1:3128")
+        with loopback_server(204) as (port, seen):
+            result = check_service(
+                _fake_service(url=f"http://monitor.test:{port}/", expected_status=204)
+            )
+
+        assert result["status"] == "UP"
+        assert len(seen.requests) == 1
+
+    def test_tls_keeps_sni_host_and_verification_with_custom_ca(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SSL_CERT_FILE", str(TLS_DIR / "monitor-test.crt"))
+        with loopback_server(200, tls=True) as (port, seen):
+            result = check_service(_fake_service(url=f"https://monitor.test:{port}/health"))
+
+        assert result["status"] == "UP", result["error_message"]
+        assert seen.sni == ["monitor.test"]
+        assert seen.requests == [("/health", f"monitor.test:{port}")]
+
+    def test_tls_hostname_mismatch_fails_without_leaking_the_address(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SSL_CERT_FILE", str(TLS_DIR / "monitor-test.crt"))
+        with loopback_server(200, tls=True) as (port, seen):
+            result = check_service(_fake_service(url=f"https://other.test:{port}/"))
+
+        assert result["status"] == "DOWN"
+        assert "other.test" in result["error_message"]
+        assert "mismatch" in result["error_message"].lower()
+        assert LOOPBACK not in result["error_message"]
+        assert seen.requests == []
