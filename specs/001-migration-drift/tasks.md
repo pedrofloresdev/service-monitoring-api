@@ -51,7 +51,7 @@ Rules for every task:
     - With local PG, every new test fails because the migration does not exist yet. The failure output shows the missing behavior, not a fixture error.
     - `ruff` and `mypy` are clean.
 
-- [ ] **T5. The migration.** Create it with `alembic revision -m "align schema with models"` (`down_revision = "3f8a12b9c4d1"`) and hand-write the upgrade and downgrade from plan §7.1 and §7.2, including the offline-mode branch. Existing revisions are not edited. RF-1..RF-6, RNF-1
+- [x] **T5. The migration.** Create it with `alembic revision -m "align schema with models"` (`down_revision = "3f8a12b9c4d1"`) and hand-write the upgrade and downgrade from plan §7.1 and §7.2, including the offline-mode branch. Existing revisions are not edited. RF-1..RF-6, RNF-1
   - Done when:
     - All T4 tests pass on local PG.
     - `python -m tools.schema_check` exits 0 with "No schema differences".
