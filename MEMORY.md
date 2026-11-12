@@ -25,6 +25,7 @@
 - Spec 001-migration-drift approved 2026-11-12 (branch `feature/001-migration-drift`, stacked on `feature/000-foundations`). Measured drift (migrated PG15 vs models): `metrics.checked_at` nullable + no default, `metrics.status` nullable + VARCHAR (model String(4)), `services.expected_status/check_interval/is_active` nullable. Alembic `compare_metadata` with `compare_type=True` did NOT flag the VARCHAR length difference, so the RF-7 check needs more than plain autogenerate compare.
 - 001 owner decision (OQ-1 option a): the new migration DELETES legacy metrics (NULL `checked_at`) and reports the count. This is an approved one-time exception to constitution P1, limited to those rows. NULL service config columns get the model defaults; NULL or over-long `metrics.status` aborts the migration (never invent or truncate health data).
 - 001 plan approved 2026-11-12: one hand-written migration (precheck status -> delete legacy + log count via alembic logger -> backfill service defaults -> defaults/NOT NULL/VARCHAR(4)); `python -m tools.schema_check` builds migrated DB + `create_all` DB on `TEST_POSTGRES_URL` and diffs inspector snapshots (types compiled for PG dialect, constraints compared by columns not names); `postgres`-marked tests deselected by default; new CI job `migrations` with PG15 service. Measured: migration ~2.4s on 1M rows; seeding 1M rows ~47s (RNF-3 is manual). PR #2 -> feature/000-foundations, then PR #1 -> master.
+- 001 implemented locally 2026-11-12 (T1-T6, T8 done; T7/T9 await GitHub): migration `a62134b6f191`, `tools/schema_check.py`, 12 `postgres` tests. Verified: schema check 0 diffs, RNF-3 2.62s on 1M rows, compose smoke test shows timestamps + uptime 100.0, OpenAPI unchanged.
 - Roadmap renumbered 2026-11-12: 001 migration-drift, 002 metrics-retention, 003 alerting, 004 postgres-test-parity, 005 api-auth.
 
 ## Lessons / mistakes to avoid
@@ -33,5 +34,7 @@
 - FastAPI uses route return annotations as response models: typing routes without `response_model` can silently change OpenAPI.
 
 ## Next steps
-- Implement 001-migration-drift T1..T9 on `feature/001-migration-drift` (tasks approved 2026-11-12).
-- Then finish 000: T8 Mermaid render check, T10 throwaway broken-lint PR and cancellation check, re-run the compose smoke test, `/sdd-validate 000-foundations`.
+- Needs owner OK: push `feature/001-migration-drift`, open PR #2 into `feature/000-foundations` and merge it, so PR #1 (000+001 -> master) runs all 5 CI checks (001 T7).
+- One throwaway PR to `master` covering: lint-error run with only `lint` red (000 RF-7), two quick pushes to show cancellation (000 RF-8), a drifted model column with only `migrations` red (001 RF-7). Close unmerged.
+- Owner checks that the Mermaid diagrams in `docs/architecture.md` render on GitHub (000 T8).
+- Then `/sdd-validate 001-migration-drift` and `/sdd-validate 000-foundations`.
