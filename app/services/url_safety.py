@@ -1,14 +1,22 @@
 """URL safety: never send a check to a non-public address (spec 002).
 
-Pure classification of addresses and hosts. The blocked range table mirrors the spec
-exactly; `ipaddress.is_global` is not used because it disagrees with the spec
-(embedded-IPv4 forms, NAT64, the "whole block" rule).
+Pure classification of addresses and hosts, plus one resolver with a deadline. The
+blocked range table mirrors the spec exactly; `ipaddress.is_global` is not used because
+it disagrees with the spec (embedded-IPv4 forms, NAT64, the "whole block" rule).
 """
 
+import queue
+import socket
+import threading
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from enum import Enum
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_address
+from typing import Any
 
 IPAddress = IPv4Address | IPv6Address
+GetAddrInfo = Callable[..., list[tuple[Any, ...]]]
 
 # Fixed texts (spec 002 RF-5, RF-7, RF-8, RF-9).
 NOT_ALLOWED_MESSAGE = "Destination not allowed: the URL host is not a public address"
@@ -104,3 +112,78 @@ def classify_host(host: str) -> HostClass:
     if literal is None:
         return HostClass.HOSTNAME
     return HostClass.PUBLIC_LITERAL if is_public_address(literal) else HostClass.UNSAFE_LITERAL
+
+
+# ---------------------------------------------------------------------------
+# Resolution
+# ---------------------------------------------------------------------------
+
+_NAME_NOT_FOUND_CODES = {socket.EAI_NONAME, getattr(socket, "EAI_NODATA", socket.EAI_NONAME)}
+
+
+@dataclass(frozen=True)
+class Resolution:
+    """Addresses returned within the deadline: IPv4 first, then IPv6, duplicates removed.
+
+    `error` is set only when no address came back: "timed out", "name not found" or
+    "lookup failed".
+    """
+
+    addresses: tuple[IPAddress, ...]
+    error: str | None
+
+
+def resolve_host(host: str, timeout: float, getaddrinfo: GetAddrInfo | None = None) -> Resolution:
+    """Resolve both address families in parallel and keep what arrives before the deadline.
+
+    Each lookup runs in a daemon thread: a lookup that outlives the deadline is abandoned
+    (its result is discarded) and never blocks shutdown.
+    """
+    lookup = getaddrinfo or socket.getaddrinfo  # resolved at call time (tests patch socket)
+    results: queue.Queue[tuple[int, list[tuple[Any, ...]] | Exception]] = queue.Queue()
+
+    def run(family: int) -> None:
+        # Any failure (OSError, UnicodeError for odd names, ...) is reported, never lost.
+        try:
+            results.put((family, lookup(host, None, family, socket.SOCK_STREAM)))
+        except Exception as exc:
+            results.put((family, exc))
+
+    families: tuple[int, ...] = (socket.AF_INET, socket.AF_INET6)
+    for started in families:
+        threading.Thread(target=run, args=(started,), daemon=True).start()
+
+    deadline = time.monotonic() + timeout
+    answers: dict[int, list[tuple[Any, ...]] | Exception] = {}
+    while len(answers) < len(families):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            answered, value = results.get(timeout=remaining)
+        except queue.Empty:
+            break
+        answers[answered] = value
+
+    addresses: list[IPAddress] = []
+    for family in families:
+        answer = answers.get(family)
+        if isinstance(answer, list):
+            for entry in answer:
+                address = ip_address(str(entry[4][0]).split("%", 1)[0])
+                if address not in addresses:
+                    addresses.append(address)
+    if addresses:
+        return Resolution(tuple(addresses), None)
+    return Resolution((), _failure_reason(answers, len(families)))
+
+
+def _failure_reason(answers: dict[int, Any], expected: int) -> str:
+    if len(answers) < expected:
+        return "timed out"
+    errors = [value for value in answers.values() if isinstance(value, Exception)]
+    if not errors or any(
+        isinstance(err, socket.gaierror) and err.errno in _NAME_NOT_FOUND_CODES for err in errors
+    ):
+        return "name not found"
+    return "lookup failed"

@@ -5,7 +5,9 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
 import ipaddress  # noqa: E402
 import socket  # noqa: E402
+import time  # noqa: E402
 from collections.abc import Iterator  # noqa: E402
+from dataclasses import dataclass, field  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
 from typing import Any  # noqa: E402
 from unittest.mock import patch  # noqa: E402
@@ -22,6 +24,8 @@ from app.db.models.metrics import Metric  # noqa: E402
 from app.db.models.services import Service  # noqa: E402
 from app.db.session import get_db  # noqa: E402
 from app.main import app  # noqa: E402
+from app.services import url_safety  # noqa: E402
+from app.services.url_safety import IPAddress, Resolution  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Network guard (spec 002 RNF-7)
@@ -75,6 +79,39 @@ def network_guard(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(socket, "getaddrinfo", guarded_getaddrinfo)
     monkeypatch.setattr(socket.socket, "connect", guarded_connect)
     monkeypatch.setattr(socket.socket, "connect_ex", guarded_connect_ex)
+
+
+# ---------------------------------------------------------------------------
+# Fake resolver (spec 002): every hostname resolves to a public address unless a test
+# says otherwise, so the code under test never needs real DNS.
+# ---------------------------------------------------------------------------
+
+PUBLIC_TEST_ADDRESS = "93.184.216.34"
+
+
+@dataclass
+class FakeResolver:
+    answers: dict[str, Resolution] = field(default_factory=dict)
+    delay: float = 0.0
+    calls: list[str] = field(default_factory=list)
+
+    def set(self, host: str, *addresses: str, error: str | None = None) -> None:
+        parsed: tuple[IPAddress, ...] = tuple(ipaddress.ip_address(a) for a in addresses)
+        self.answers[host] = Resolution(parsed, None if parsed else (error or "name not found"))
+
+    def __call__(self, host: str, timeout: float, getaddrinfo: Any = None) -> Resolution:
+        self.calls.append(host)
+        if self.delay:
+            time.sleep(self.delay)
+        default = Resolution((ipaddress.ip_address(PUBLIC_TEST_ADDRESS),), None)
+        return self.answers.get(host, default)
+
+
+@pytest.fixture(autouse=True)
+def fake_resolver(monkeypatch: pytest.MonkeyPatch) -> FakeResolver:
+    resolver = FakeResolver()
+    monkeypatch.setattr(url_safety, "resolve_host", resolver)
+    return resolver
 
 
 # ---------------------------------------------------------------------------

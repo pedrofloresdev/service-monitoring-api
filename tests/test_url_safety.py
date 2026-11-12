@@ -1,18 +1,28 @@
 """Unit tests for URL safety logic (spec 002)."""
 
 import ipaddress
+import socket
+import time
+from collections.abc import Callable
+from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
+from app.core.config import Settings
+from app.services import url_safety
 from app.services.url_safety import (
     HostClass,
+    Resolution,
     classify_host,
     embedded_ipv4,
     is_public_address,
     is_reserved_name,
     normalize_host,
     parse_literal,
+    resolve_host,  # the real function: conftest's fake_resolver patches the module attribute only
 )
+from tests.conftest import PUBLIC_TEST_ADDRESS, FakeResolver
 
 # ---------------------------------------------------------------------------
 # Blocked range table (spec 002, Definitions)
@@ -216,3 +226,123 @@ def test_parse_literal() -> None:
 )
 def test_classify_host(host: str, expected: HostClass) -> None:
     assert classify_host(host) is expected
+
+
+# ---------------------------------------------------------------------------
+# Resolution timeout setting (spec 002 RNF-3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("value", ["abc", 0, -1, 30.5])
+def test_invalid_resolution_timeout_is_rejected(value: object) -> None:
+    overrides: dict[str, Any] = {"RESOLUTION_TIMEOUT_SECONDS": value}
+    with pytest.raises(ValidationError):
+        Settings(**overrides)
+
+
+@pytest.mark.parametrize("value", [0.1, 30, "1.5"])
+def test_valid_resolution_timeout_is_accepted(value: object) -> None:
+    overrides: dict[str, Any] = {"RESOLUTION_TIMEOUT_SECONDS": value}
+    assert Settings(**overrides).RESOLUTION_TIMEOUT_SECONDS == float(str(value))
+
+
+def test_resolution_timeout_defaults_to_two_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RESOLUTION_TIMEOUT_SECONDS", raising=False)
+    assert Settings(_env_file=None).RESOLUTION_TIMEOUT_SECONDS == 2.0
+
+
+# ---------------------------------------------------------------------------
+# Resolver with deadline (spec 002 RF-3, RF-6, RF-9)
+# ---------------------------------------------------------------------------
+
+V4 = "93.184.216.34"
+V6 = "2606:4700:4700::1111"
+
+
+def _entry(family: int, address: str) -> tuple[Any, ...]:
+    sockaddr: tuple[Any, ...] = (address, 0) if family == socket.AF_INET else (address, 0, 0, 0)
+    return (family, socket.SOCK_STREAM, 6, "", sockaddr)
+
+
+def _fake_getaddrinfo(
+    v4: list[str] | Exception, v6: list[str] | Exception, delay: dict[int, float] | None = None
+) -> Callable[..., list[tuple[Any, ...]]]:
+    def getaddrinfo(host: str, port: Any, family: int = 0, *args: Any) -> list[tuple[Any, ...]]:
+        time.sleep((delay or {}).get(family, 0.0))
+        answer = v4 if family == socket.AF_INET else v6
+        if isinstance(answer, Exception):
+            raise answer
+        return [_entry(family, address) for address in answer]
+
+    return getaddrinfo
+
+
+def _addresses(*values: str) -> tuple[ipaddress.IPv4Address | ipaddress.IPv6Address, ...]:
+    return tuple(ipaddress.ip_address(value) for value in values)
+
+
+NONAME = socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+
+
+def test_resolver_returns_both_families_ipv4_first() -> None:
+    result = resolve_host("example.com", 1.0, _fake_getaddrinfo([V4], [V6], {socket.AF_INET: 0.05}))
+    assert result == Resolution(_addresses(V4, V6), None)
+
+
+def test_resolver_keeps_partial_answer_when_one_family_fails() -> None:
+    result = resolve_host("example.com", 1.0, _fake_getaddrinfo([V4], NONAME))
+    assert result == Resolution(_addresses(V4), None)
+
+
+def test_resolver_returns_by_the_deadline_with_the_answers_it_has() -> None:
+    getaddrinfo = _fake_getaddrinfo([V4], [V6], {socket.AF_INET6: 1.0})
+    start = time.monotonic()
+    result = resolve_host("example.com", 0.2, getaddrinfo)
+    assert time.monotonic() - start < 0.2 + 0.3
+    assert result == Resolution(_addresses(V4), None)
+
+
+def test_resolver_times_out_without_answers() -> None:
+    getaddrinfo = _fake_getaddrinfo([V4], [V6], {socket.AF_INET: 1.0, socket.AF_INET6: 1.0})
+    start = time.monotonic()
+    result = resolve_host("example.com", 0.2, getaddrinfo)
+    assert time.monotonic() - start < 0.2 + 0.3
+    assert result == Resolution((), "timed out")
+
+
+def test_resolver_reports_unknown_name() -> None:
+    result = resolve_host("nope.invalid", 1.0, _fake_getaddrinfo(NONAME, NONAME))
+    assert result == Resolution((), "name not found")
+
+
+def test_resolver_reports_other_lookup_errors() -> None:
+    failure = socket.gaierror(socket.EAI_AGAIN, "Temporary failure in name resolution")
+    result = resolve_host("example.com", 1.0, _fake_getaddrinfo(failure, failure))
+    assert result == Resolution((), "lookup failed")
+
+
+def test_resolver_removes_duplicates_and_scope_ids() -> None:
+    result = resolve_host("example.com", 1.0, _fake_getaddrinfo([V4, V4], ["fe80::1%eth0", V6]))
+    assert result == Resolution(_addresses(V4, "fe80::1", V6), None)
+
+
+def test_resolver_reports_unexpected_lookup_errors_without_waiting() -> None:
+    failure = UnicodeError("label too long")
+    start = time.monotonic()
+    result = resolve_host("example.com", 1.0, _fake_getaddrinfo(failure, failure))
+    assert time.monotonic() - start < 0.5
+    assert result == Resolution((), "lookup failed")
+
+
+def test_resolver_uses_the_socket_module_by_default() -> None:
+    # Under the network guard the real lookup is blocked (and reported), so nothing comes back.
+    assert resolve_host("example.com", 0.5) == Resolution((), "lookup failed")
+
+
+def test_conftest_fake_resolver_replaces_the_module_resolver(fake_resolver: FakeResolver) -> None:
+    fake_resolver.set("private.test", "10.0.0.1")
+    assert url_safety.resolve_host("any.test", 1.0) == Resolution(
+        _addresses(PUBLIC_TEST_ADDRESS), None
+    )
+    assert url_safety.resolve_host("private.test", 1.0) == Resolution(_addresses("10.0.0.1"), None)
+    assert fake_resolver.calls == ["any.test", "private.test"]

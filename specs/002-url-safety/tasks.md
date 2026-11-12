@@ -12,7 +12,7 @@ Every "Done when" also implies the quality gates are green: `ruff check .`, `ruf
   - New `app/services/url_safety.py`: the IPv4/IPv6 tables, `embedded_ipv4`, `is_public_address`, `normalize_host`, `is_reserved_name`, `parse_literal`, `classify_host`, the four fixed messages/prefix as constants. Tests first in `tests/test_url_safety.py`.
   - Done when: parametrized tests pass for every table row (an address inside each block, and a public neighbour where meaningful), mapped/compatible/NAT64 forms of a private and a public IPv4, `::` and `::1`, a 6to4, a Teredo and a `64:ff9b:1::1` address, `localhost` / `LOCALHOST.` / `localhost..` / `app.localhost` (reserved) and `localhost.example.com` (not reserved), and each `classify_host` outcome; the module has no I/O imports.
 
-- [ ] **T3. Resolution timeout setting and resolver with deadline.** RF-3, RF-6, RF-9, RNF-3
+- [x] **T3. Resolution timeout setting and resolver with deadline.** RF-3, RF-6, RF-9, RNF-3
   - `RESOLUTION_TIMEOUT_SECONDS` (float, default 2.0, `> 0`, `<= 30`) in settings and `.env.example`. `resolve_host(host, timeout, getaddrinfo=...)` returning `Resolution` (plan A1). Autouse `fake_resolver` fixture in `tests/conftest.py` returning a public address for any hostname.
   - Done when: settings tests show `"abc"`, `0`, `-1`, `30.5` raise `ValidationError` and `0.1`, `30` and the default 2.0 are accepted; resolver tests with an injected `getaddrinfo` pass for both families, partial answer (IPv6 error), IPv6 slower than the deadline (returns within deadline + 0.3 s with the IPv4 addresses), both slow ("timed out"), both `gaierror` ("name not found"), duplicates removed, IPv4-first order.
 
