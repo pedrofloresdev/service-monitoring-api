@@ -11,5 +11,5 @@ router = APIRouter(prefix=PREFIX, tags=[NAME])
 
 
 @router.get("", response_model=SystemStatus)
-def status(db: Session = Depends(get_db)):
+def status(db: Session = Depends(get_db)) -> SystemStatus:
     return get_services_status(db)

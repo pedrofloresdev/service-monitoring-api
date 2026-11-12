@@ -1,5 +1,6 @@
 import logging
 import time
+from typing import Any
 
 import httpx
 from sqlalchemy.orm import Session
@@ -12,7 +13,7 @@ from app.db.session import SessionLocal
 logger = logging.getLogger(__name__)
 
 
-def check_service(service: Service) -> dict:
+def check_service(service: Service) -> dict[str, Any]:
     start = time.monotonic()
     try:
         with httpx.Client(timeout=settings.CHECK_TIMEOUT_SECONDS) as client:
@@ -58,7 +59,7 @@ def check_service_by_id(service_id: int) -> None:
         db.close()
 
 
-def get_consecutive_failures(db: Session, service_id: int, limit: int = None) -> int:
+def get_consecutive_failures(db: Session, service_id: int, limit: int | None = None) -> int:
     if limit is None:
         limit = settings.FAIL_THRESHOLD
 

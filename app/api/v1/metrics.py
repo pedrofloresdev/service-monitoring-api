@@ -23,7 +23,7 @@ def get_service_metrics(
         default=None, ge=1, le=8760, description="Restrict to last N hours"
     ),
     db: Session = Depends(get_db),
-):
+) -> MetricsPage:
     service = db.query(Service).filter(Service.id == service_id).first()
     if not service:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")

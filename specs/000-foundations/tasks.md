@@ -34,7 +34,7 @@ Rules for every task:
     - `mypy` reports no errors in `app/db/`.
     - `pytest` is green with coverage ≥ 88%.
 
-- [ ] **T4. Annotate the rest of the application code.** Make these changes:
+- [x] **T4. Annotate the rest of the application code.** Make these changes:
   - `main.py`: `lifespan -> AsyncIterator[None]`. `root()` and `health()` get `-> dict[str, str]` and `response_model=None`.
   - Route return annotations in `api/v1/*`.
   - `get_db -> Iterator[Session]`.
