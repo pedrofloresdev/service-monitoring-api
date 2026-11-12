@@ -23,7 +23,7 @@ A small, reliable uptime monitor exposed as a REST API: register endpoints, chec
 - Authentication/multi-tenant accounts, alerting/notifications, UI dashboard, non-HTTP checks (TCP, DNS), distributed workers.
 
 ## Spec roadmap
-- `000-foundations` - baseline: document architecture, add pyproject with ruff + mypy and make them green, keep pytest green, fix `.env.example`, add GitHub Actions CI (lint, type check, tests).
+- `000-foundations` - baseline: document architecture, add pyproject with ruff + mypy and make them green, keep pytest green, fix `.env.example`, add GitHub Actions CI (lint, format, type check, tests).
 - `001-metrics-retention` - configurable retention/cleanup of old metrics.
 - `002-alerting` - notify (webhook) on UP->DOWN and DOWN->UP transitions.
 - `003-postgres-test-parity` - run the test suite against PostgreSQL in CI.

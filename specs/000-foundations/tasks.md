@@ -82,7 +82,7 @@ Rules for every task:
     - Each item in the §8.2 checklist is confirmed against the code, with the file and line noted while checking.
     - Both Mermaid diagrams render on GitHub in the PR file view.
 
-- [ ] **T9. Documentation sync.** Make these changes:
+- [x] **T9. Documentation sync.** Make these changes:
   - README: add dev setup with `requirements-dev.txt`, a "Quality checks" section with the four commands from plan §5, the 4 CI check names to mark as required, a link to `docs/architecture.md`, and the container-only `PORT` note.
   - AGENTS.md `## Commands`: list the real commands and remove "not set up yet".
   - `docs/SPEC.md`: the roadmap entry lists lint, format, type check and tests.

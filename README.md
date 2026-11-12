@@ -80,6 +80,8 @@ app/
 └── main.py          # App factory + lifespan
 ```
 
+For how a health check flows from the scheduler to a stored metric, and how UP/DOWN, average response time and uptime are derived, see [docs/architecture.md](docs/architecture.md).
+
 ---
 
 ## API Reference
@@ -179,24 +181,51 @@ Interactive docs: `http://localhost:8000/docs`
 
 ```bash
 python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt               # runtime deps + dev tools (Python 3.11)
 
-# Set DATABASE_URL in .env, then:
+cp .env.example .env    # then set DATABASE_URL to your PostgreSQL
 alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
 ---
 
+## Quality Checks
+
+Tool configuration lives in `pyproject.toml`. Install the dev tools with `pip install -r requirements-dev.txt`, then:
+
+| Check | Command |
+|---|---|
+| Lint | `ruff check .` |
+| Format | `ruff format .` (check only: `ruff format --check .`) |
+| Type check | `mypy` (strict mode, `app/` and `tests/`) |
+| Tests + coverage floor | `pytest` (fails if coverage of `app/` drops below the floor in `pyproject.toml`) |
+
+### Continuous integration
+
+GitHub Actions (`.github/workflows/ci.yml`) runs the four checks as independent jobs on every pull request to `master` and on every push to `master`. Each job reports its own status: `lint`, `format`, `typecheck`, `test`. To block merges while a check fails, mark these four as required status checks in the repository's branch protection settings for `master`.
+
+---
+
 ## Configuration
 
-All settings are loaded from `.env` via `pydantic-settings`.
+All settings are loaded from `.env` via `pydantic-settings`. `.env.example` lists exactly these.
 
 | Variable | Default | Description |
 |---|---|---|
 | `DATABASE_URL` | *(required)* | PostgreSQL connection string |
 | `FAIL_THRESHOLD` | `3` | Consecutive failures before marking a service DOWN |
 | `CHECK_TIMEOUT_SECONDS` | `10` | HTTP request timeout per check |
+
+The default `check_interval` for a new service (60 seconds) is fixed in code, not a setting; each service can set its own interval (10–86400 seconds).
+
+**Container-only variables** (not read by the application, so not in `.env.example`):
+
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `8000` | Port uvicorn listens on inside the API container (used by the Dockerfile `CMD` and `HEALTHCHECK`) |
+
+With `docker compose`, the API container's `DATABASE_URL` is set in `docker-compose.yml` and overrides the value from `.env`.
 
 ---
 

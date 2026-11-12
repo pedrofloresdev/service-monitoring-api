@@ -6,7 +6,8 @@ REST API that registers HTTP services, checks them on a per-service schedule, st
 - Python 3.11, FastAPI, Pydantic v2 + pydantic-settings
 - PostgreSQL 15, SQLAlchemy 2.0 (sync sessions), Alembic migrations
 - APScheduler (BackgroundScheduler, one interval job per active service), httpx for checks
-- pip + `requirements.txt`; Docker + docker compose
+- pip + `requirements.txt` (runtime) and `requirements-dev.txt` (ruff, mypy, pytest); Docker + docker compose
+- Tool config in `pyproject.toml` (ruff, mypy strict, coverage floor); CI in `.github/workflows/ci.yml`
 
 ## Structure
 - `app/api/v1/` - route handlers (services, metrics, status)
@@ -17,15 +18,17 @@ REST API that registers HTTP services, checks them on a per-service schedule, st
 - `app/workers/scheduler.py` - scheduler lifecycle and per-service jobs
 - `migrations/versions/` - Alembic revisions
 - `tests/` - pytest, one file per area; `conftest.py` provides in-memory SQLite and mocks the scheduler
-- `docs/` - constitution and product SPEC
+- `docs/` - constitution, product SPEC, architecture
 - `specs/NNN-name/` - spec.md, plan.md, tasks.md per feature
 
 ## Commands
+- Setup: `pip install -r requirements-dev.txt` (Python 3.11)
 - Run: `alembic upgrade head && uvicorn app.main:app --reload` (or `docker compose up --build`)
 - Build: `docker compose build`
-- Test: `pytest` (coverage report included via pytest.ini)
-- Lint/format: not set up yet
-- Type check: not set up yet
+- Test: `pytest` (fails below the coverage floor set in `pyproject.toml`)
+- Lint: `ruff check .`
+- Format: `ruff format .` (check only: `ruff format --check .`)
+- Type check: `mypy` (strict, over `app/` and `tests/`)
 
 ## Conventions
 - Everything in English (code, comments, identifiers, commits, docs).
@@ -47,7 +50,7 @@ REST API that registers HTTP services, checks them on a per-service schedule, st
 - 🚫 Never: implement what is not in the spec, commit secrets (`.env`), skip failing tests, advance an SDD phase without approval.
 
 ## Verification
-- `pytest` green with no coverage regression; lint and type check clean once set up.
+- `ruff check .`, `ruff format --check .`, `mypy` and `pytest` all green (coverage at or above the floor, no regression). CI runs the same four checks on every PR.
 - Manual: `docker compose up --build`, then `GET /health` and `GET /api/v1/status` respond; state what was verified.
 
 ## Memory
