@@ -198,12 +198,31 @@ Tool configuration lives in `pyproject.toml`. Install the dev tools with `pip in
 |---|---|
 | Lint | `ruff check .` |
 | Format | `ruff format .` (check only: `ruff format --check .`) |
-| Type check | `mypy` (strict mode, `app/` and `tests/`) |
+| Type check | `mypy` (strict mode, `app/`, `tests/` and `tools/`) |
 | Tests + coverage floor | `pytest` (fails if coverage of `app/` drops below the floor in `pyproject.toml`) |
+
+### PostgreSQL checks (migrations)
+
+The default test suite runs on in-memory SQLite. Two extra checks need a real PostgreSQL server, given as an admin URL where databases can be created and dropped:
+
+```bash
+cp .env.example .env    # if you have no .env yet (docker compose needs it)
+docker compose up -d db
+export TEST_POSTGRES_URL=postgresql://postgres:postgres@localhost:5432/postgres
+
+python -m tools.schema_check     # migration history vs models: exit 0 = identical, 1 = differences
+pytest -m postgres --no-cov      # migration behavior and endpoints on the migrated schema
+```
+
+`TEST_POSTGRES_URL` is a tooling variable, not an app setting. Without it, both commands fail with these instructions instead of passing silently.
 
 ### Continuous integration
 
-GitHub Actions (`.github/workflows/ci.yml`) runs the four checks as independent jobs on every pull request to `master` and on every push to `master`. Each job reports its own status: `lint`, `format`, `typecheck`, `test`. To block merges while a check fails, mark these four as required status checks in the repository's branch protection settings for `master`.
+GitHub Actions (`.github/workflows/ci.yml`) runs five independent jobs on every pull request to `master` and on every push to `master`. Each job reports its own status: `lint`, `format`, `typecheck`, `test` and `migrations`. The `migrations` job runs the PostgreSQL checks against a disposable PostgreSQL 15 container. To block merges while a check fails, mark these five as required status checks in the repository's branch protection settings for `master`.
+
+### Upgrading an existing database
+
+Migration `a62134b6f191` (spec 001) fixes a bug where checks were stored without a timestamp on PostgreSQL. It **deletes** those legacy metrics, because their real time is unknown and they could not be shown, and logs how many it deleted (`Deleted N legacy metric(s) with NULL checked_at`). Back up the database before running `alembic upgrade head`. If any metric has an empty or invalid status, the migration stops without changing anything.
 
 ---
 

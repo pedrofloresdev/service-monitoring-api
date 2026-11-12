@@ -70,7 +70,7 @@ Rules for every task:
     - After PR #2 (`feature/001-migration-drift` into `feature/000-foundations`) is merged, which needs owner confirmation, PR #1 shows `migrations` and the other four checks green.
     - The run takes under 5 minutes.
 
-- [ ] **T8. Docs.** Make these changes:
+- [x] **T8. Docs.** Make these changes:
   - README Quality Checks: the local PG command, `TEST_POSTGRES_URL`, the schema check and `pytest -m postgres` commands, five required CI checks, and the backup note for the upgrade.
   - AGENTS.md Commands.
   - `docs/architecture.md` §6 trade-off.
