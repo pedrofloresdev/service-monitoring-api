@@ -24,6 +24,7 @@
 - 000 OQ-1 (pre-existing on master): migrations never set `metrics.checked_at` server default / NOT NULL, so on Postgres every metric has `checked_at = NULL` -> metrics endpoint 500, uptime always 0.0. Owner decision: fix in spec 001 before 000 sign-off.
 - Spec 001-migration-drift approved 2026-11-12 (branch `feature/001-migration-drift`, stacked on `feature/000-foundations`). Measured drift (migrated PG15 vs models): `metrics.checked_at` nullable + no default, `metrics.status` nullable + VARCHAR (model String(4)), `services.expected_status/check_interval/is_active` nullable. Alembic `compare_metadata` with `compare_type=True` did NOT flag the VARCHAR length difference, so the RF-7 check needs more than plain autogenerate compare.
 - 001 owner decision (OQ-1 option a): the new migration DELETES legacy metrics (NULL `checked_at`) and reports the count. This is an approved one-time exception to constitution P1, limited to those rows. NULL service config columns get the model defaults; NULL or over-long `metrics.status` aborts the migration (never invent or truncate health data).
+- 001 plan approved 2026-11-12: one hand-written migration (precheck status -> delete legacy + log count via alembic logger -> backfill service defaults -> defaults/NOT NULL/VARCHAR(4)); `python -m tools.schema_check` builds migrated DB + `create_all` DB on `TEST_POSTGRES_URL` and diffs inspector snapshots (types compiled for PG dialect, constraints compared by columns not names); `postgres`-marked tests deselected by default; new CI job `migrations` with PG15 service. Measured: migration ~2.4s on 1M rows; seeding 1M rows ~47s (RNF-3 is manual). PR #2 -> feature/000-foundations, then PR #1 -> master.
 - Roadmap renumbered 2026-11-12: 001 migration-drift, 002 metrics-retention, 003 alerting, 004 postgres-test-parity, 005 api-auth.
 
 ## Lessons / mistakes to avoid
@@ -32,5 +33,5 @@
 - FastAPI uses route return annotations as response models: typing routes without `response_model` can silently change OpenAPI.
 
 ## Next steps
-- Run `/sdd-plan 001-migration-drift` (then tasks, implement), on `feature/001-migration-drift`.
+- Run `/sdd-tasks 001-migration-drift`, then implement on `feature/001-migration-drift`.
 - Then finish 000: T8 Mermaid render check, T10 throwaway broken-lint PR and cancellation check, re-run the compose smoke test, `/sdd-validate 000-foundations`.
