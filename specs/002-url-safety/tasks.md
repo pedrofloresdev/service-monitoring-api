@@ -4,7 +4,7 @@ Spec: `specs/002-url-safety/spec.md` (approved). Plan: `specs/002-url-safety/pla
 Branch: `feature/002-url-safety`. One task at a time, tests first for logic, one commit per task with `Refs: specs/002-url-safety Tn`.
 Every "Done when" also implies the quality gates are green: `ruff check .`, `ruff format --check .`, `mypy`, `pytest` (coverage >= 88, no regression).
 
-- [ ] **T1. Offline test harness: network guard.** RNF-7
+- [x] **T1. Offline test harness: network guard.** RNF-7
   - Autouse `network_guard` fixture in `tests/conftest.py` (skipped for `postgres`-marked tests): DNS lookups of anything but loopback literals and connections to non-loopback addresses raise.
   - Done when: a new test shows `socket.getaddrinfo("example.com")` and a connect to `198.51.100.1:80` both raise under the guard, a connect to a loopback listener still works, and the existing default suite passes unchanged (same test count plus the new ones).
 
