@@ -58,7 +58,7 @@ Rules for every task:
     - `git diff --stat` shows only one added file under `migrations/versions/`.
     - The spec 000 checks are green.
 
-- [ ] **T6. End-to-end test on the migrated schema.** Write `tests/postgres/test_migrated_schema_api.py`. It migrates a fresh DB to head, stores a service and a check without a timestamp through the ORM, then calls `GET /api/v1/metrics/services/{id}` and `GET /api/v1/status` through `TestClient`, with `get_db` overridden to the PG session and the scheduler patched. RF-2, RF-9
+- [x] **T6. End-to-end test on the migrated schema.** Write `tests/postgres/test_migrated_schema_api.py`. It migrates a fresh DB to head, stores a service and a check without a timestamp through the ORM, then calls `GET /api/v1/metrics/services/{id}` and `GET /api/v1/status` through `TestClient`, with `get_db` overridden to the PG session and the scheduler patched. RF-2, RF-9
   - Done when:
     - The test passes at head.
     - With the DB migrated only to `3f8a12b9c4d1`, the same test fails: metrics returns 500 or uptime is 0.0. This is checked once by temporarily changing the target revision, and not committed.
