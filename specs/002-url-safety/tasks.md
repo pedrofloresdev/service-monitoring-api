@@ -1,0 +1,44 @@
+# Tasks - 002 URL safety
+
+Spec: `specs/002-url-safety/spec.md` (approved). Plan: `specs/002-url-safety/plan.md` (approved).
+Branch: `feature/002-url-safety`. One task at a time, tests first for logic, one commit per task with `Refs: specs/002-url-safety Tn`.
+Every "Done when" also implies the quality gates are green: `ruff check .`, `ruff format --check .`, `mypy`, `pytest` (coverage >= 88, no regression).
+
+- [ ] **T1. Offline test harness: network guard.** RNF-7
+  - Autouse `network_guard` fixture in `tests/conftest.py` (skipped for `postgres`-marked tests): DNS lookups of anything but loopback literals and connections to non-loopback addresses raise.
+  - Done when: a new test shows `socket.getaddrinfo("example.com")` and a connect to `198.51.100.1:80` both raise under the guard, a connect to a loopback listener still works, and the existing default suite passes unchanged (same test count plus the new ones).
+
+- [ ] **T2. Address and host classification (pure).** RF-2, RF-6, RF-7, RF-8 (definitions: blocked range table, embedded-IPv4 forms, reserved name, literal host)
+  - New `app/services/url_safety.py`: the IPv4/IPv6 tables, `embedded_ipv4`, `is_public_address`, `normalize_host`, `is_reserved_name`, `parse_literal`, `classify_host`, the four fixed messages/prefix as constants. Tests first in `tests/test_url_safety.py`.
+  - Done when: parametrized tests pass for every table row (an address inside each block, and a public neighbour where meaningful), mapped/compatible/NAT64 forms of a private and a public IPv4, `::` and `::1`, a 6to4, a Teredo and a `64:ff9b:1::1` address, `localhost` / `LOCALHOST.` / `localhost..` / `app.localhost` (reserved) and `localhost.example.com` (not reserved), and each `classify_host` outcome; the module has no I/O imports.
+
+- [ ] **T3. Resolution timeout setting and resolver with deadline.** RF-3, RF-6, RF-9, RNF-3
+  - `RESOLUTION_TIMEOUT_SECONDS` (float, default 2.0, `> 0`, `<= 30`) in settings and `.env.example`. `resolve_host(host, timeout, getaddrinfo=...)` returning `Resolution` (plan A1). Autouse `fake_resolver` fixture in `tests/conftest.py` returning a public address for any hostname.
+  - Done when: settings tests show `"abc"`, `0`, `-1`, `30.5` raise `ValidationError` and `0.1`, `30` and the default 2.0 are accepted; resolver tests with an injected `getaddrinfo` pass for both families, partial answer (IPv6 error), IPv6 slower than the deadline (returns within deadline + 0.3 s with the IPv4 addresses), both slow ("timed out"), both `gaierror` ("name not found"), duplicates removed, IPv4-first order.
+
+- [ ] **T4. Request-validation rejection (no DNS).** RF-1, RF-2, RF-5 (schema part)
+  - `url` field validator on `ServiceCreate` and `ServiceUpdate` using `classify_host`; raw submitted URL kept in a private attribute (plan A2, D8).
+  - Done when: `POST` and `PATCH` with each reserved name and each unsafe literal from the RNF-6 "rejected" list return 422 with the exact entry (`type` `url_not_allowed`, `loc` `["body","url"]`, exact `msg`, `input` = submitted string, no `ctx`); a reserved URL with an empty `name` returns one 422 with both entries; a reserved URL on an unknown service id returns 422 (not 404); public mapped/compatible/NAT64 literals are accepted; no row is created or changed and `schedule_service` is not called on rejection.
+
+- [ ] **T5. Hostname check on create/update and its precedence.** RF-1, RF-3, RF-4, RF-5 (handler part), RNF-4
+  - `UnsafeDestinationError` + `ensure_registration_allowed` in `url_safety.py`; called in `create_service` before the duplicate query and in `update_service` after the 404 when `url` is in the request; exception handler in `app/main.py` (plan A3, D4).
+  - Done when: tests pass for a hostname resolving to a private address and to a mixed answer (422, exact body, `input` = submitted string), an unresolvable and a timed-out hostname (201 accepted), resolves-private on an unknown service id (404), resolves-private duplicate on create (422, not 409), `PATCH` re-sending the stored unsafe URL with a name change (422), `PATCH` without `url` on an unsafe service (200), no write and no scheduling on any rejection; and with the resolution timeout set to 1.0 s and a resolver sleeping 1.0 s in a threaded create, `GET /health` and `GET /api/v1/status` each answer in under 500 ms.
+
+- [ ] **T6. Check-time decisions: block or fail before any request.** RF-6, RF-7, RF-8, RF-9, RF-16, RNF-5
+  - In `check_service`: parse the stored URL (`raw_host`), classify, resolve, and return the fixed failed results before any request (plan A4, first half). The send path for allowed destinations stays as today in this task.
+  - Done when: tests show reserved-name variants and unsafe literals give the RF-7 message, private and mixed answers give the RF-8 message, no answer and timeout give a message starting with `resolution failed:` that contains the hostname and no IP; each is DOWN with no status code and no response time, and `httpx.Client` is never called; a public-then-private resolution across two checks gives UP then RF-8; a service row with `http://localhost/` stored directly keeps its row and earlier metrics after `check_service_by_id` stores the RF-7 metric; all existing `test_monitor.py` tests pass unchanged.
+
+- [ ] **T7. Pinned send with shared connect budget.** RF-10, RF-11, RF-12, RF-13, RF-14, RNF-1, RNF-2
+  - Rewrite the send path (plan A4, second half): validated addresses IPv4 first, URL host rewritten to the address, original `Host` header, `sni_hostname` for HTTPS hostnames, `httpx.Client(trust_env=False, verify=create_ssl_context(trust_env=True), follow_redirects=False)`, per-attempt `Timeout(CHECK_TIMEOUT_SECONDS, connect=remaining budget)`, fallback only on TCP-level connect errors (D5, D6, D7).
+  - Done when: mocked-client tests show the pinned target URL, `Host` header and `sni_hostname` passed (and none for a public literal); refused first address then 200 on the second gives UP; a TLS-caused `ConnectError` stops after one attempt; with `CHECK_TIMEOUT_SECONDS=1` and 3 addresses each timing out after their connect timeout, the check makes at most 3 attempts and finishes in under resolution-timeout + 1 s + 1 s tolerance; the client is built with `trust_env=False` and `follow_redirects=False`; response time is measured from the start of the check; all existing `test_monitor.py` tests pass unchanged.
+
+- [ ] **T8. Error redaction and real loopback checks (redirect, proxy, TLS).** RF-11, RF-13, RF-14, RF-15
+  - `redact` in `url_safety.py`, applied to every failure message of `check_service` (D9). Committed self-signed cert/key for `monitor.test` in `tests/fixtures/tls/` with a README holding the regeneration command (D10, approved). Loopback server fixtures; test seam patches `is_public_address` for `127.0.0.1`.
+  - Done when: redaction unit tests pass for IPv4, IPv6 and bracketed IPv6; a loopback server answering 302 to `http://127.0.0.1/secret` gives status code 302 and receives exactly one request; with `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` set to an unreachable address the check still reaches the loopback server; a loopback TLS server with the fixture cert and `SSL_CERT_FILE` pointing to it gives UP and saw SNI and `Host` `monitor.test`; the same server reached as a name the cert does not cover gives DOWN with a hostname-mismatch error containing no IP address; no 422 body or stored error in the whole suite contains a resolved IP (asserted in the T5/T6/T8 tests).
+
+- [ ] **T9. Documentation.** RF-17
+  - `docs/architecture.md` (component table, check sequence diagram with resolve -> validate -> pinned connect, URL safety section), `docs/SPEC.md` current scope, `description` on the `url` field of both request schemas.
+  - Done when: the docs contain the blocked range table, embedded-IPv4 forms, reserved names, the 422 error, the RF-7/RF-8/RF-9 messages, the proxy/CA behavior and the resolution timeout setting; the roadmap shows 002-006 in the new numbering; the Mermaid diagram renders (GitHub preview of the branch); an OpenAPI diff against `master` shows only the `url` field descriptions changed.
+
+- [ ] **T10. End-to-end verification and validation record.** RNF-1, RNF-7, RNF-9, RNF-10, completion criteria
+  - Done when: `specs/002-url-safety/validation.md` has one row per completion criterion and RNF with evidence; `python -m tools.schema_check` reports 0 diffs and `pytest -m postgres --no-cov` passes; the default suite also passes under `unshare -rn pytest` (no network namespace); `docker compose up --build` shows `POST` `http://169.254.169.254/` and `http://db:5432/` -> 422, `POST` `https://example.com/` -> 201 then an UP metric with a status code after one interval, and `GET /health` and `GET /api/v1/status` respond; the PR's 5 CI checks are green (box left unticked until CI evidence exists).
