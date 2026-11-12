@@ -115,6 +115,6 @@ Metrics for a single service are also exposed through `GET /api/v1/metrics/servi
 
 ## 6. Known trade-offs
 
-- **Tests run on SQLite** (in memory) with the scheduler mocked; production runs on PostgreSQL. Postgres-specific behavior (timezones, types) is not covered by the test suite.
+- **Tests run on SQLite** (in memory) with the scheduler mocked; production runs on PostgreSQL. The default suite builds tables from the models, so it cannot see differences between the migration history and the models. That gap is closed by the `migrations` CI job: `python -m tools.schema_check` compares a database built by `alembic upgrade head` with one built from the models, and `pytest -m postgres` exercises the migrations and the metrics/status endpoints on PostgreSQL. Other Postgres-specific behavior in the rest of the suite is still not covered (roadmap spec 004).
 - **Sync SQLAlchemy sessions** in both requests and scheduler threads: simpler than mixing async and threaded code, at the cost of one blocking DB call per operation.
 - **Status aggregation queries per service** (latest metric, recent failures, average, 24h window), which is fine for the expected number of services.

@@ -15,7 +15,7 @@ select = ["E", "W", "F", "I", "B"]
 ignore = ["E501"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["app", "tests"]
+known-first-party = ["app", "tests", "tools"]
 
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI dependency-injection and parameter declarations are meant to be call defaults.
@@ -24,7 +24,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["app", "tests"]
+files = ["app", "tests", "tools"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]

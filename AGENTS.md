@@ -28,7 +28,8 @@ REST API that registers HTTP services, checks them on a per-service schedule, st
 - Test: `pytest` (fails below the coverage floor set in `pyproject.toml`)
 - Lint: `ruff check .`
 - Format: `ruff format .` (check only: `ruff format --check .`)
-- Type check: `mypy` (strict, over `app/` and `tests/`)
+- Type check: `mypy` (strict, over `app/`, `tests/` and `tools/`)
+- PostgreSQL checks (need `docker compose up -d db` and `TEST_POSTGRES_URL=postgresql://postgres:postgres@localhost:5432/postgres`): `python -m tools.schema_check` (migration history vs models) and `pytest -m postgres --no-cov`
 
 ## Conventions
 - Everything in English (code, comments, identifiers, commits, docs).
