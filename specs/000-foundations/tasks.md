@@ -11,7 +11,7 @@ Rules for every task:
 
 ## Tasks
 
-- [ ] **T1. Dev tooling and config.** Create `requirements-dev.txt` (`-r requirements.txt`, `ruff==0.17.2`, `mypy==2.4.1`, `pytest==8.3.5`, `pytest-cov==6.1.0`). Remove the `# Testing` block from `requirements.txt`. Create `pyproject.toml` with the ruff, mypy and coverage tables from plan §4.1. No source changes. RF-1, RF-2, RF-3, RF-4, RNF-4, RNF-5
+- [x] **T1. Dev tooling and config.** Create `requirements-dev.txt` (`-r requirements.txt`, `ruff==0.17.2`, `mypy==2.4.1`, `pytest==8.3.5`, `pytest-cov==6.1.0`). Remove the `# Testing` block from `requirements.txt`. Create `pyproject.toml` with the ruff, mypy and coverage tables from plan §4.1. No source changes. RF-1, RF-2, RF-3, RF-4, RNF-4, RNF-5
   - Done when:
     - In a fresh Python 3.11 venv, `pip install -r requirements-dev.txt` succeeds.
     - `ruff --version` prints 0.17.2 and `mypy --version` prints 2.4.1.
