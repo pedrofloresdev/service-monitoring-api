@@ -195,7 +195,6 @@ All settings are loaded from `.env` via `pydantic-settings`.
 | Variable | Default | Description |
 |---|---|---|
 | `DATABASE_URL` | *(required)* | PostgreSQL connection string |
-| `SCHEDULER_INTERVAL_SECONDS` | `60` | Fallback check interval if not set per service |
 | `FAIL_THRESHOLD` | `3` | Consecutive failures before marking a service DOWN |
 | `CHECK_TIMEOUT_SECONDS` | `10` | HTTP request timeout per check |
 

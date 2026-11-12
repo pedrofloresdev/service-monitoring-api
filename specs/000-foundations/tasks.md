@@ -62,7 +62,7 @@ Rules for every task:
     - `ruff check .` and `ruff format --check .` exit 0.
     - `pytest` is green with coverage ≥ 88%.
 
-- [ ] **T6. Configuration hygiene.** Delete `SCHEDULER_INTERVAL_SECONDS` from `app/core/config.py` and its row from the README configuration table. Rewrite `.env.example` exactly as in plan §4.4. RF-10, RF-11
+- [x] **T6. Configuration hygiene.** Delete `SCHEDULER_INTERVAL_SECONDS` from `app/core/config.py` and its row from the README configuration table. Rewrite `.env.example` exactly as in plan §4.4. RF-10, RF-11
   - Done when:
     - `grep -rn SCHEDULER_INTERVAL_SECONDS .` matches only under `specs/` and `MEMORY.md`.
     - The keys in `.env.example` are exactly `DATABASE_URL`, `FAIL_THRESHOLD`, `CHECK_TIMEOUT_SECONDS`, which are the `Settings` fields plus what `migrations/env.py` reads.
