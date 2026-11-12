@@ -49,7 +49,7 @@ Rules for every task:
     - `ruff check .` and `ruff format --check .` exit 0.
     - `pytest` is green with coverage ≥ 88%.
 
-- [ ] **T5. Annotate the test suite.** Make these changes:
+- [x] **T5. Annotate the test suite.** Make these changes:
   - Annotate fixtures, the helpers `make_metric` and `_fake_service`, and every test function (`-> None`).
   - `_fake_service` returns `cast(Service, SimpleNamespace(...))`.
   - No assertion, input or expected value changes.
