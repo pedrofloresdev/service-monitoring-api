@@ -93,7 +93,7 @@ Rules for every task:
     - `grep -n "not set up yet" AGENTS.md README.md` finds nothing.
     - Every setting named in the README exists in `Settings`.
 
-- [ ] **T10. Validation evidence.** Run the full plan §7.3 equivalence check and record the results in `specs/000-foundations/validation.md`:
+- [x] **T10. Validation evidence.** Run the full plan §7.3 equivalence check and record the results in `specs/000-foundations/validation.md`:
   - `docker compose up --build`, then `GET /health` and `GET /api/v1/status` return 200 (RNF-1d).
   - `docker compose run --rm api pip show pytest` reports not found (RNF-5).
   - A throwaway PR with a deliberate lint error shows only `CI / lint` red while the other 3 complete. The PR is closed unmerged and its link recorded (RF-7).

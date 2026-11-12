@@ -64,7 +64,7 @@ Rules for every task:
     - With the DB migrated only to `3f8a12b9c4d1`, the same test fails: metrics returns 500 or uptime is 0.0. This is checked once by temporarily changing the target revision, and not committed.
     - All `postgres` tests pass.
 
-- [ ] **T7. CI job.** Add the `migrations` job to `.github/workflows/ci.yml` per plan §4.2: a PG15 service with a dummy password, `TEST_POSTGRES_URL`, `python -m tools.schema_check`, then `pytest -m postgres --no-cov`, with the same pinned actions. RF-8, RNF-5
+- [x] **T7. CI job.** Add the `migrations` job to `.github/workflows/ci.yml` per plan §4.2: a PG15 service with a dummy password, `TEST_POSTGRES_URL`, `python -m tools.schema_check`, then `pytest -m postgres --no-cov`, with the same pinned actions. RF-8, RNF-5
   - Done when:
     - actionlint is clean, and the workflow has no `secrets.` reference.
     - After PR #2 (`feature/001-migration-drift` into `feature/000-foundations`) is merged, which needs owner confirmation, PR #1 shows `migrations` and the other four checks green.
@@ -81,7 +81,7 @@ Rules for every task:
     - The README lists the 5 check names.
     - The architecture doc matches the code.
 
-- [ ] **T9. Validation evidence.** Record the following in `specs/001-migration-drift/validation.md`:
+- [x] **T9. Validation evidence.** Record the following in `specs/001-migration-drift/validation.md`:
   - RNF-3: seed 1M metrics (half legacy) at `3f8a12b9c4d1` on local PG, then time `alembic upgrade head`. It must take under 60 s and report the deleted count.
   - The spec 000 compose smoke test: a registered service, then the metrics endpoint returns 200 with timestamps, and `uptime_last_24h` is above 0.
   - RNF-2: the OpenAPI snapshot is identical to `feature/000-foundations`.
