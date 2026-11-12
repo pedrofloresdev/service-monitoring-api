@@ -42,7 +42,7 @@ Rules for every task:
     - `pytest -m postgres --no-cov` without `TEST_POSTGRES_URL` errors with the instructions (not "skipped").
     - With local PG, a throwaway call of each fixture works and leaves no database behind. The throwaway test is not committed.
 
-- [ ] **T4. Migration tests, red.** Write `tests/postgres/test_migration_drift.py` (`pytestmark = pytest.mark.postgres`) with the tests in plan §10:
+- [x] **T4. Migration tests, red.** Write `tests/postgres/test_migration_drift.py` (`pytestmark = pytest.mark.postgres`) with the tests in plan §10:
   - RF-1, RF-3 (with a non-zero count and the zero case), RF-4, RF-5 (NULL status and over-long status, both with full rollback), RF-6 (downgrade keeps rows; downgrade then upgrade equals a single upgrade).
   - The edge cases: hand-fixed columns, and `upgrade head` run twice.
 
