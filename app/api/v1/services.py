@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from app.db.session import get_db
+
 from app.db.models.services import Service
-from app.schemas.services import ServiceCreate, ServiceUpdate, ServiceResponse
+from app.db.session import get_db
+from app.schemas.services import ServiceCreate, ServiceResponse, ServiceUpdate
 from app.workers.scheduler import schedule_service, unschedule_service
 
 NAME = "services"
@@ -15,7 +16,9 @@ def create_service(payload: ServiceCreate, db: Session = Depends(get_db)):
     normalized_url = str(payload.url)
     existing = db.query(Service).filter(Service.url == normalized_url).first()
     if existing:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A service with this URL already exists")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="A service with this URL already exists"
+        )
 
     data = payload.model_dump()
     data["url"] = normalized_url

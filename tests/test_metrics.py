@@ -2,6 +2,7 @@
 Endpoint tests for /api/v1/metrics/services/{id}.
 Covers: pagination, time-range filter, 404 on unknown service.
 """
+
 from datetime import datetime, timedelta, timezone
 
 from tests.conftest import make_metric
@@ -51,7 +52,9 @@ class TestGetMetrics:
     def test_hours_filter_excludes_old_metrics(self, client, db_session, service):
         old_metric = make_metric(db_session, service.id, "UP")
         old_time = datetime.now(timezone.utc) - timedelta(hours=48)
-        db_session.query(old_metric.__class__).filter_by(id=old_metric.id).update({"checked_at": old_time})
+        db_session.query(old_metric.__class__).filter_by(id=old_metric.id).update(
+            {"checked_at": old_time}
+        )
         db_session.commit()
 
         make_metric(db_session, service.id, "UP")

@@ -1,11 +1,13 @@
 import logging
 import time
+
 import httpx
 from sqlalchemy.orm import Session
-from app.db.session import SessionLocal
-from app.db.models.services import Service
-from app.db.models.metrics import Metric
+
 from app.core.config import settings
+from app.db.models.metrics import Metric
+from app.db.models.services import Service
+from app.db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +44,13 @@ def check_service_by_id(service_id: int) -> None:
         result = check_service(service)
         db.add(Metric(service_id=service.id, **result))
         db.commit()
-        logger.info("Checked service %d (%s): %s in %.1fms", service.id, service.name, result["status"], result["response_time_ms"] or 0)
+        logger.info(
+            "Checked service %d (%s): %s in %.1fms",
+            service.id,
+            service.name,
+            result["status"],
+            result["response_time_ms"] or 0,
+        )
     except Exception:
         db.rollback()
         logger.exception("Error while checking service %d", service_id)

@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+
 from app.db.session import get_db
-from app.services.status import get_services_status
 from app.schemas.status import SystemStatus
+from app.services.status import get_services_status
 
 NAME = "status"
 PREFIX = f"/{NAME}"

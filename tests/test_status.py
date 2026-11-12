@@ -3,8 +3,9 @@ Tests for GET /api/v1/status.
 Covers: empty state, UP/DOWN determination via FAIL_THRESHOLD,
 uptime calculation, and inactive service exclusion.
 """
-from tests.conftest import make_metric
+
 from app.db.models.services import Service
+from tests.conftest import make_metric
 
 BASE = "/api/v1/status"
 FAIL_THRESHOLD = 3  # mirrors settings default

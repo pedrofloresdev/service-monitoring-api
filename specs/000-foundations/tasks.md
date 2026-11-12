@@ -19,7 +19,7 @@ Rules for every task:
     - Temporarily setting `fail_under = 99` makes `pytest` exit non-zero. The change is reverted afterwards.
     - `requirements.txt` no longer lists pytest or pytest-cov.
 
-- [ ] **T2. Mechanical pass.** Run `ruff format .` and `ruff check --fix .` over the checked code. This fixes import order, the 2 unused imports and the missing trailing newline. No other edits. RF-1, RF-2, RNF-2
+- [x] **T2. Mechanical pass.** Run `ruff format .` and `ruff check --fix .` over the checked code. This fixes import order, the 2 unused imports and the missing trailing newline. No other edits. RF-1, RF-2, RNF-2
   - Done when:
     - `ruff check .` exits 0.
     - `ruff format --check .` exits 0.

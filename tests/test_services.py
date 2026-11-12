@@ -2,7 +2,6 @@
 Endpoint tests for /api/v1/services.
 Covers: create, list, get, patch, delete — including error cases.
 """
-import pytest
 
 BASE = "/api/v1/services"
 VALID_PAYLOAD = {
@@ -16,6 +15,7 @@ VALID_PAYLOAD = {
 # ---------------------------------------------------------------------------
 # POST /services
 # ---------------------------------------------------------------------------
+
 
 class TestCreateService:
     def test_returns_201_and_service_data(self, client):
@@ -55,6 +55,7 @@ class TestCreateService:
 # GET /services
 # ---------------------------------------------------------------------------
 
+
 class TestListServices:
     def test_returns_empty_list_when_no_services(self, client):
         resp = client.get(BASE)
@@ -70,7 +71,10 @@ class TestListServices:
 
     def test_active_only_filter_excludes_inactive(self, client, service, db_session):
         from app.db.models.services import Service as ServiceModel
-        db_session.query(ServiceModel).filter(ServiceModel.id == service.id).update({"is_active": False})
+
+        db_session.query(ServiceModel).filter(ServiceModel.id == service.id).update(
+            {"is_active": False}
+        )
         db_session.commit()
 
         resp = client.get(BASE, params={"active_only": True})
@@ -79,7 +83,10 @@ class TestListServices:
 
     def test_without_active_only_returns_inactive_too(self, client, service, db_session):
         from app.db.models.services import Service as ServiceModel
-        db_session.query(ServiceModel).filter(ServiceModel.id == service.id).update({"is_active": False})
+
+        db_session.query(ServiceModel).filter(ServiceModel.id == service.id).update(
+            {"is_active": False}
+        )
         db_session.commit()
 
         resp = client.get(BASE)
@@ -90,6 +97,7 @@ class TestListServices:
 # ---------------------------------------------------------------------------
 # GET /services/{id}
 # ---------------------------------------------------------------------------
+
 
 class TestGetService:
     def test_returns_service(self, client, service):
@@ -106,6 +114,7 @@ class TestGetService:
 # ---------------------------------------------------------------------------
 # PATCH /services/{id}
 # ---------------------------------------------------------------------------
+
 
 class TestUpdateService:
     def test_update_name(self, client, service):
@@ -137,6 +146,7 @@ class TestUpdateService:
 # ---------------------------------------------------------------------------
 # DELETE /services/{id}
 # ---------------------------------------------------------------------------
+
 
 class TestDeleteService:
     def test_delete_returns_204(self, client, service):

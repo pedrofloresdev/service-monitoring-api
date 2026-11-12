@@ -1,9 +1,11 @@
 import logging
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
-from app.workers.scheduler import start_scheduler, stop_scheduler
+
 from app.api.v1 import PREFIX as V1_PREFIX
-from app.api.v1 import services, metrics, status
+from app.api.v1 import metrics, services, status
+from app.workers.scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(
     level=logging.INFO,

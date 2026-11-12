@@ -3,10 +3,12 @@ Unit tests for the monitor service layer.
 Tests check_service (HTTP logic) and get_consecutive_failures (DB logic)
 in isolation — no real HTTP calls, mocked via httpx.
 """
+
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import httpx
+
 from app.services.monitor import check_service, get_consecutive_failures
 from tests.conftest import make_metric
 
@@ -18,6 +20,7 @@ def _fake_service(url="https://example.com/health", expected_status=200):
 # ---------------------------------------------------------------------------
 # check_service
 # ---------------------------------------------------------------------------
+
 
 class TestCheckService:
     def test_returns_up_when_status_matches_expected(self):
@@ -91,6 +94,7 @@ class TestCheckService:
 # ---------------------------------------------------------------------------
 # get_consecutive_failures
 # ---------------------------------------------------------------------------
+
 
 class TestGetConsecutiveFailures:
     def test_returns_zero_when_no_metrics(self, db_session, service):
