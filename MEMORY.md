@@ -28,6 +28,8 @@
 - 001 implemented 2026-11-12, all T1-T9 done, merged into `feature/000-foundations` via PR #2 (`aad8751`): migration `a62134b6f191`, `tools/schema_check.py`, 12 `postgres` tests. Verified: schema check 0 diffs, RNF-3 2.62s on 1M rows, compose smoke test shows timestamps + uptime 100.0, OpenAPI unchanged.
 - Roadmap renumbered 2026-11-12: 001 migration-drift, 002 metrics-retention, 003 alerting, 004 postgres-test-parity, 005 api-auth.
 
+- 2026-11-12: validation verdicts: 001 SPEC FULFILLED; 000 SPEC FULFILLED EXCEPT RF-6 (post-merge). Old template `docs/workflow-guide.md` (deleted in harness commit 19b941c) replaced by a guide for the current SDD workflow; sdd skill now documents validation.md, measuring before planning, per-task commits and mid-task bug handling.
+
 ## Lessons / mistakes to avoid
 - Run `ruff format --check` before every push, including throwaway commits: an over-long comment broke the isolation of a CI validation run.
 - Tests build tables with `create_all` from the models, so migration-vs-model drift is invisible to pytest; only a real `alembic upgrade head` on Postgres (compose) reveals it. Always smoke-test the write path end to end, not only `/health`.
@@ -35,5 +37,6 @@
 - FastAPI uses route return annotations as response models: typing routes without `response_model` can silently change OpenAPI.
 
 ## Next steps
-- Run `/sdd-validate 001-migration-drift` and `/sdd-validate 000-foundations`; then mark PR #1 ready and merge it to `master` (owner).
-- After merge: confirm the push-to-master CI run (000 RF-6) and mark the 5 checks as required in branch protection (manual, owner).
+- Owner: merge PR #1 (`feature/000-foundations` -> `master`, carries 000 + 001 + SDD guide; marked ready 2026-11-12, all 5 checks green on `a5be382`).
+- After merge: confirm the push-to-`master` CI run (000 RF-6) and record it in `specs/000-foundations/validation.md`; mark the 5 checks as required in branch protection (owner, manual).
+- Next spec candidates (roadmap): 002-metrics-retention; also make the default `check_interval` a setting (P3 gap) and move compose credentials out of the file (P7 gap).
