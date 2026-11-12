@@ -209,3 +209,8 @@ __marimo__/
 # Personal Claude overrides — never commit
 CLAUDE.local.md
 .claude/settings.local.json
+# SDD harness
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
