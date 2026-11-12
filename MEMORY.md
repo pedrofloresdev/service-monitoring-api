@@ -33,5 +33,5 @@
 - FastAPI uses route return annotations as response models: typing routes without `response_model` can silently change OpenAPI.
 
 ## Next steps
-- Run `/sdd-tasks 001-migration-drift`, then implement on `feature/001-migration-drift`.
+- Implement 001-migration-drift T1..T9 on `feature/001-migration-drift` (tasks approved 2026-11-12).
 - Then finish 000: T8 Mermaid render check, T10 throwaway broken-lint PR and cancellation check, re-run the compose smoke test, `/sdd-validate 000-foundations`.
