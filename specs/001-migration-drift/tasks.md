@@ -28,7 +28,7 @@ Rules for every task:
     - No `schema_check_*` database remains afterwards (`\l`).
     - The spec 000 checks are green.
 
-- [ ] **T3. PostgreSQL test infrastructure.** Make these changes:
+- [x] **T3. PostgreSQL test infrastructure.** Make these changes:
   - `pytest.ini`: register the `postgres` marker and add `-m "not postgres"` to `addopts`.
   - `tests/postgres/__init__.py`.
   - `tests/postgres/conftest.py` with three fixtures:
