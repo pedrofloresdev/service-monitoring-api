@@ -1,6 +1,7 @@
 # 002 - URL safety
 
 Status: approved (2026-11-12, after two `/sdd-clarify` passes)
+Change (2026-11-23, owner-approved via /sdd-change after /sdd-validate): RF-17 keeps the detailed URL safety reference only in `docs/architecture.md`; `docs/SPEC.md` summarizes and links to it, so the two cannot drift.
 
 ## Context and goal
 A service URL is accepted if it is a well-formed `http` or `https` URL. Nothing checks where it points. Anyone who can register or update a service can make the scheduler send requests to:
@@ -97,7 +98,7 @@ Roadmap: this spec is inserted as 002. The later roadmap specs each move down on
 ### Data and docs
 - RF-15: THE SYSTEM SHALL NOT include any resolved IP address in a 422 response or in a stored check's error message. The hostname given by the client may appear.
 - RF-16: THE SYSTEM SHALL NOT modify, deactivate or delete a service or its stored checks because its URL is unsafe. Such services stay active and scheduled, and their checks are handled by RF-6 to RF-9.
-- RF-17: THE SYSTEM SHALL document the blocked range table, the embedded-IPv4 forms, the reserved names, the 422 error, the check error messages, the proxy behavior (RF-14) and the resolution timeout setting in the product SPEC, in the architecture document and (in short form) in the API description of the `url` field. The product SPEC roadmap SHALL show the new numbering (see Context).
+- RF-17: THE SYSTEM SHALL document the blocked range table, the embedded-IPv4 forms, the reserved names, the 422 error, the check error messages, the proxy behavior (RF-14) and the resolution timeout setting in the architecture document, which is the single detailed reference. The product SPEC SHALL summarize the URL safety rules and point to that section, and the API description of the `url` field SHALL state them in short form. The product SPEC roadmap SHALL show the new numbering (see Context).
 
 ## Non-functional requirements
 - RNF-1: For a URL whose host resolves only to public addresses, a check gives the same outcome as before this spec: same status code, same UP/DOWN, same redirect handling, and the response time is still measured from the start of the check (including resolution). Constitution principle 1. The only exceptions:
