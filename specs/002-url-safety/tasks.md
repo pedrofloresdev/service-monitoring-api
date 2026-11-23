@@ -36,7 +36,7 @@ Every "Done when" also implies the quality gates are green: `ruff check .`, `ruf
   - `redact` in `url_safety.py`, applied to every failure message of `check_service` (D9). Committed self-signed cert/key for `monitor.test` in `tests/fixtures/tls/` with a README holding the regeneration command (D10, approved). Loopback server fixtures; test seam patches `is_public_address` for `127.0.0.1`.
   - Done when: redaction unit tests pass for IPv4, IPv6 and bracketed IPv6; a loopback server answering 302 to `http://127.0.0.1/secret` gives status code 302 and receives exactly one request; with `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` set to an unreachable address the check still reaches the loopback server; a loopback TLS server with the fixture cert and `SSL_CERT_FILE` pointing to it gives UP and saw SNI and `Host` `monitor.test`; the same server reached as a name the cert does not cover gives DOWN with a hostname-mismatch error containing no IP address; no 422 body or stored error in the whole suite contains a resolved IP (asserted in the T5/T6/T8 tests).
 
-- [ ] **T9. Documentation.** RF-17
+- [x] **T9. Documentation.** RF-17
   - `docs/architecture.md` (component table, check sequence diagram with resolve -> validate -> pinned connect, URL safety section), `docs/SPEC.md` current scope, `description` on the `url` field of both request schemas.
   - Done when: the docs contain the blocked range table, embedded-IPv4 forms, reserved names, the 422 error, the RF-7/RF-8/RF-9 messages, the proxy/CA behavior and the resolution timeout setting; the roadmap shows 002-006 in the new numbering; the Mermaid diagram renders (GitHub preview of the branch); an OpenAPI diff against `master` shows only the `url` field descriptions changed.
 
