@@ -50,6 +50,6 @@
 - FastAPI uses route return annotations as response models: typing routes without `response_model` can silently change OpenAPI.
 
 ## Next steps
-- Owner: merge PR #5 (spec 002, URL safety; validated SPEC FULFILLED 2026-11-23). It also carries the spec 000 sign-off from PR #4 (merged into the 002 branch on 2026-11-23), so PR #4 can be merged first or simply closed. Merge PR #6 (`reviewer` agent on Sonnet) independently.
-- PR #1 is merged; RF-6 verified on push run 43315795094; branch protection ruleset `protect-master` is active.
-- Then roadmap: 003-metrics-retention; also make the default `check_interval` a setting (P3 gap) and move compose credentials out of the file (P7 gap). Start with `/sdd-spec`.
+- Specs 003a-demo-mode and 003b-rate-limiting are drafts on branch `feature/003-demo-mode` (2026-11-23), revised after clarify pass 1 on the original 003-demo-mode (43 findings, run on Sonnet). Owner accepted all revision choices. Next: `/sdd-clarify 003a-demo-mode` and `/sdd-clarify 003b-rate-limiting`, then approval, then renumber the roadmap in docs/SPEC.md (003a, 003b, then 004 metrics-retention, 005 alerting, 006 postgres-test-parity, 007 api-auth).
+- 003 owner decisions: split into 003a (seeding, protection, global cap 20 + per-host cap 3, demo min interval 300 s, reset every 24 h anchored at 00:00 UTC with catch-up only, demo notice on GET /) and 003b (sliding-window rate limits 60/min general and 10/min writes, client identification via trusted proxy hops, IPv6 /64 grouping as a setting, per-client cap 3, moved here because it needs client identification). PATCH to a duplicate URL returns 409 everywhere (closes the spec 002 gap). Standing principle 1 exception for reset deletions of visitor data. Demo mode refuses to start with more than one process. Benchmarks documented, not CI gates.
+- Later: make the default `check_interval` a setting (P3 gap) and move compose credentials out of the file (P7 gap).
