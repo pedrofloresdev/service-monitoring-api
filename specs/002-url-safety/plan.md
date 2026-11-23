@@ -42,7 +42,7 @@ No schema change, no migration, no new dependency, no Docker change, no schedule
 | `docs/architecture.md` | modify | Component table (new module), check sequence diagram (resolve -> validate -> pinned connect), URL safety section: table, embedded forms, reserved names, errors, proxy/CA behavior, setting | RF-17 |
 | `tests/conftest.py` | modify | Two autouse fixtures: network guard (RNF-7) and a fake resolver returning a public address for every hostname (keeps existing tests offline, RNF-8) | RNF-7, RNF-8 |
 | `tests/test_url_safety.py` | new | Pure logic table tests, resolver tests with an injected `getaddrinfo`, redaction, settings validation | RNF-6 (rejected/accepted lists, configuration) |
-| `tests/test_services.py` | modify (add tests only) | Create/update rejected, accepted and precedence cases, error shape, no write/no schedule on rejection, RNF-4 responsiveness | RF-1 to RF-5, RNF-4, RNF-6 |
+| `tests/test_services.py` (as built: the tests went into the new `tests/test_services_url_safety.py`; `tests/test_services.py` is unchanged) | modify (add tests only) | Create/update rejected, accepted and precedence cases, error shape, no write/no schedule on rejection, RNF-4 responsiveness | RF-1 to RF-5, RNF-4, RNF-6 |
 | `tests/test_monitor.py` | modify (add tests only) | Check-time cases, fallback, connect budget, redirect/proxy/TLS on a loopback server, redaction, existing unsafe service | RF-6 to RF-16, RNF-1, RNF-2, RNF-6 |
 | `tests/fixtures/tls/monitor-test.crt`, `monitor-test.key` | new | Self-signed test certificate for `monitor.test` (valid 100 years), used only by the loopback TLS test. Regeneration command in a README next to it | RF-11, RF-14 (needs approval, see below) |
 
