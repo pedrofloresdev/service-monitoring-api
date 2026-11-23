@@ -4,16 +4,35 @@ Tests check_service (HTTP logic) and get_consecutive_failures (DB logic)
 in isolation — no real HTTP calls, mocked via httpx.
 """
 
+import ipaddress
+import socket
+import ssl
+import threading
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import httpx
+import pytest
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
+from app.db.models.metrics import Metric
 from app.db.models.services import Service
-from app.services.monitor import check_service, get_consecutive_failures
-from tests.conftest import make_metric
+from app.services import url_safety
+from app.services.monitor import check_service, check_service_by_id, get_consecutive_failures
+from app.services.url_safety import (
+    RESOLUTION_FAILED_PREFIX,
+    UNSAFE_LITERAL_MESSAGE,
+    UNSAFE_RESOLVED_MESSAGE,
+)
+from tests.conftest import PUBLIC_TEST_ADDRESS, FakeResolver, PartialDns, make_metric
 
 
 def _fake_service(url: str = "https://example.com/health", expected_status: int = 200) -> Service:
@@ -148,3 +167,422 @@ class TestGetConsecutiveFailures:
             make_metric(db_session, service.id, "DOWN")
         # With limit=3, only checks 3 most recent
         assert get_consecutive_failures(db_session, service.id, limit=3) == 3
+
+
+# ---------------------------------------------------------------------------
+# URL safety at check time (spec 002 RF-6 to RF-9, RF-16)
+# ---------------------------------------------------------------------------
+
+
+def _assert_failed_without_request(result: dict[str, Any], client_cls: MagicMock) -> None:
+    assert result["status"] == "DOWN"
+    assert result["status_code"] is None
+    assert result["response_time_ms"] is None
+    client_cls.assert_not_called()
+
+
+class TestCheckTimeDestination:
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://localhost/",
+            "http://localhost./",
+            "http://localhost../",
+            "http://app.localhost:8000/x",
+            "http://127.0.0.1/",
+            "http://10.0.0.1:8443/",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://[::1]/",
+            "http://[::ffff:7f00:1]/",
+        ],
+    )
+    def test_reserved_name_or_unsafe_literal_is_blocked(
+        self, fake_resolver: FakeResolver, url: str
+    ) -> None:
+        with patch("app.services.monitor.httpx.Client") as client_cls:
+            result = check_service(_fake_service(url=url))
+
+        _assert_failed_without_request(result, client_cls)
+        assert result["error_message"] == UNSAFE_LITERAL_MESSAGE
+        assert fake_resolver.calls == []
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://2130706433:8000/x",  # decimal 127.0.0.1
+            "http://0x7f000001/",  # hex 127.0.0.1
+            "http://127.1/",  # short form of 127.0.0.1
+            "http://0/",  # 0.0.0.0
+            "http://ｌｏｃａｌｈｏｓｔ/",  # full-width localhost
+            "http://local­host/",  # soft hyphen inside localhost
+        ],
+    )
+    def test_legacy_row_host_is_normalized_like_registration(
+        self, fake_resolver: FakeResolver, url: str
+    ) -> None:
+        # Rows written outside the API skip request validation; the check must still
+        # normalize the host as registration does and give the RF-7 result.
+        with patch("app.services.monitor.httpx.Client") as client_cls:
+            result = check_service(_fake_service(url=url))
+
+        _assert_failed_without_request(result, client_cls)
+        assert result["error_message"] == UNSAFE_LITERAL_MESSAGE
+        assert fake_resolver.calls == []
+
+    @pytest.mark.parametrize(
+        "addresses", [("10.0.0.5",), ("93.184.216.34", "10.0.0.5"), ("2606:4700::1", "fe80::1")]
+    )
+    def test_hostname_resolving_to_non_public_is_blocked(
+        self, fake_resolver: FakeResolver, addresses: tuple[str, ...]
+    ) -> None:
+        fake_resolver.set("internal.test", *addresses)
+
+        with patch("app.services.monitor.httpx.Client") as client_cls:
+            result = check_service(_fake_service(url="https://internal.test/health"))
+
+        _assert_failed_without_request(result, client_cls)
+        assert result["error_message"] == UNSAFE_RESOLVED_MESSAGE
+        assert fake_resolver.calls == ["internal.test"]
+
+    def test_partial_answer_with_private_ipv4_is_blocked(self, partial_dns: PartialDns) -> None:
+        # Real resolver: IPv4 returns a private address, the IPv6 lookup fails (RNF-6).
+        partial_dns(socket.AF_INET, "10.0.0.5")
+
+        with patch("app.services.monitor.httpx.Client") as client_cls:
+            result = check_service(_fake_service(url="https://partial.test/health"))
+
+        _assert_failed_without_request(result, client_cls)
+        assert result["error_message"] == UNSAFE_RESOLVED_MESSAGE
+        assert "10.0.0.5" not in result["error_message"]
+
+    def test_partial_answer_with_public_ipv4_is_sent_only_to_that_address(
+        self, partial_dns: PartialDns
+    ) -> None:
+        # Real resolver: IPv4 returns a public address, the IPv6 lookup fails (RNF-6).
+        partial_dns(socket.AF_INET, "93.184.216.34")
+
+        with patch("app.services.monitor.httpx.Client") as client_cls:
+            get = client_cls.return_value.__enter__.return_value.get
+            get.return_value = _ok()
+            result = check_service(_fake_service(url="https://partial.test/health"))
+
+        assert result["status"] == "UP"
+        assert get.call_count == 1
+        args, kwargs = get.call_args
+        assert args[0] == httpx.URL("https://93.184.216.34/health")
+        assert kwargs["headers"] == {"Host": "partial.test"}
+        assert kwargs["extensions"] == {"sni_hostname": "partial.test"}
+
+    @pytest.mark.parametrize("error", ["name not found", "timed out", "lookup failed"])
+    def test_unresolvable_hostname_fails_without_request(
+        self, fake_resolver: FakeResolver, error: str
+    ) -> None:
+        fake_resolver.set("gone.test", error=error)
+
+        with patch("app.services.monitor.httpx.Client") as client_cls:
+            result = check_service(_fake_service(url="https://gone.test/"))
+
+        _assert_failed_without_request(result, client_cls)
+        assert result["error_message"] == f"{RESOLUTION_FAILED_PREFIX} gone.test: {error}"
+
+    def test_hostname_that_turns_private_is_blocked_at_the_next_check(
+        self, fake_resolver: FakeResolver
+    ) -> None:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        service = _fake_service(url="https://rebind.test/")
+
+        with patch("app.services.monitor.httpx.Client") as client_cls:
+            client_cls.return_value.__enter__.return_value.get.return_value = mock_response
+            first = check_service(service)
+            fake_resolver.set("rebind.test", "127.0.0.1")
+            second = check_service(service)
+
+        assert first["status"] == "UP"
+        assert second["status"] == "DOWN"
+        assert second["error_message"] == UNSAFE_RESOLVED_MESSAGE
+        assert client_cls.call_count == 1
+
+    def test_stored_unsafe_service_is_kept_and_its_check_is_blocked(
+        self, db_session: Session
+    ) -> None:
+        svc = Service(
+            name="Legacy", url="http://localhost/", expected_status=200, check_interval=60
+        )
+        db_session.add(svc)
+        db_session.commit()
+        earlier = make_metric(db_session, svc.id, "UP")
+        service_id, earlier_id = svc.id, earlier.id
+
+        with (
+            patch("app.services.monitor.SessionLocal", return_value=db_session),
+            patch("app.services.monitor.httpx.Client") as client_cls,
+        ):
+            check_service_by_id(service_id)
+
+        client_cls.assert_not_called()
+        stored = db_session.get(Service, service_id)
+        assert stored is not None
+        assert (stored.url, stored.is_active) == ("http://localhost/", True)
+        metrics = db_session.query(Metric).filter(Metric.service_id == service_id).all()
+        assert [m.id for m in metrics if m.id == earlier_id] == [earlier_id]
+        latest = max(metrics, key=lambda m: m.id)
+        assert (latest.status, latest.error_message) == ("DOWN", UNSAFE_LITERAL_MESSAGE)
+
+
+# ---------------------------------------------------------------------------
+# Pinned send with a shared connect budget (spec 002 RF-10 to RF-14, RNF-1, RNF-2)
+# ---------------------------------------------------------------------------
+
+
+def _ok(status_code: int = 200) -> MagicMock:
+    response = MagicMock()
+    response.status_code = status_code
+    return response
+
+
+def _tls_error() -> httpx.ConnectError:
+    error = httpx.ConnectError("certificate verify failed: Hostname mismatch")
+    error.__cause__ = ssl.SSLCertVerificationError("certificate verify failed")
+    return error
+
+
+class TestPinnedSend:
+    def test_https_hostname_is_pinned_with_host_header_and_sni(self) -> None:
+        with patch("app.services.monitor.httpx.Client") as client_cls:
+            get = client_cls.return_value.__enter__.return_value.get
+            get.return_value = _ok()
+            result = check_service(_fake_service(url="https://example.com:8443/health?x=1"))
+
+        assert result["status"] == "UP"
+        args, kwargs = get.call_args
+        assert args[0] == httpx.URL(f"https://{PUBLIC_TEST_ADDRESS}:8443/health?x=1")
+        assert kwargs["headers"] == {"Host": "example.com:8443"}
+        assert kwargs["extensions"] == {"sni_hostname": "example.com"}
+        assert kwargs["timeout"] == httpx.Timeout(10, connect=10)
+
+    def test_http_hostname_is_pinned_without_sni(self) -> None:
+        with patch("app.services.monitor.httpx.Client") as client_cls:
+            get = client_cls.return_value.__enter__.return_value.get
+            get.return_value = _ok()
+            check_service(_fake_service(url="http://example.com/"))
+
+        args, kwargs = get.call_args
+        assert args[0] == httpx.URL(f"http://{PUBLIC_TEST_ADDRESS}/")
+        assert kwargs["headers"] == {"Host": "example.com"}
+        assert kwargs["extensions"] == {}
+
+    def test_ipv6_address_is_pinned_in_brackets(self, fake_resolver: FakeResolver) -> None:
+        fake_resolver.set("v6only.test", "2606:4700::1")
+        with patch("app.services.monitor.httpx.Client") as client_cls:
+            get = client_cls.return_value.__enter__.return_value.get
+            get.return_value = _ok()
+            check_service(_fake_service(url="https://v6only.test/"))
+
+        assert str(get.call_args.args[0]) == "https://[2606:4700::1]/"
+
+    def test_public_literal_is_sent_as_is(self, fake_resolver: FakeResolver) -> None:
+        with patch("app.services.monitor.httpx.Client") as client_cls:
+            get = client_cls.return_value.__enter__.return_value.get
+            get.return_value = _ok()
+            check_service(_fake_service(url="https://8.8.8.8/"))
+
+        args, kwargs = get.call_args
+        assert args[0] == httpx.URL("https://8.8.8.8/")
+        assert kwargs["extensions"] == {}
+        assert fake_resolver.calls == []
+
+    def test_client_ignores_environment_and_redirects(self) -> None:
+        with patch("app.services.monitor.httpx.Client") as client_cls:
+            client_cls.return_value.__enter__.return_value.get.return_value = _ok()
+            check_service(_fake_service())
+
+        kwargs = client_cls.call_args.kwargs
+        assert kwargs["trust_env"] is False
+        assert kwargs["follow_redirects"] is False
+        assert isinstance(kwargs["verify"], ssl.SSLContext)
+        assert kwargs["verify"].check_hostname is True
+        assert kwargs["verify"].verify_mode is ssl.CERT_REQUIRED
+
+    def test_falls_back_to_the_next_address_on_connection_failure(
+        self, fake_resolver: FakeResolver
+    ) -> None:
+        fake_resolver.set("multi.test", "93.184.216.34", "93.184.216.35")
+        with patch("app.services.monitor.httpx.Client") as client_cls:
+            get = client_cls.return_value.__enter__.return_value.get
+            get.side_effect = [httpx.ConnectError("[Errno 111] Connection refused"), _ok()]
+            result = check_service(_fake_service(url="http://multi.test/"))
+
+        assert result["status"] == "UP"
+        hosts = [call.args[0].host for call in get.call_args_list]
+        assert hosts == ["93.184.216.34", "93.184.216.35"]
+
+    def test_tls_failure_does_not_try_another_address(self, fake_resolver: FakeResolver) -> None:
+        fake_resolver.set("multi.test", "93.184.216.34", "93.184.216.35")
+        with patch("app.services.monitor.httpx.Client") as client_cls:
+            get = client_cls.return_value.__enter__.return_value.get
+            get.side_effect = _tls_error()
+            result = check_service(_fake_service(url="https://multi.test/"))
+
+        assert result["status"] == "DOWN"
+        assert "Hostname mismatch" in result["error_message"]
+        assert get.call_count == 1
+
+    def test_connect_budget_is_shared_by_all_attempts(
+        self, fake_resolver: FakeResolver, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(settings, "CHECK_TIMEOUT_SECONDS", 1)
+        fake_resolver.set("blackhole.test", "93.184.216.34", "93.184.216.35", "93.184.216.36")
+        connect_timeouts: list[float] = []
+
+        def unreachable(*args: Any, **kwargs: Any) -> Any:
+            connect = kwargs["timeout"].connect
+            connect_timeouts.append(connect)
+            time.sleep(connect)
+            raise httpx.ConnectTimeout("timed out")
+
+        start = time.monotonic()
+        with patch("app.services.monitor.httpx.Client") as client_cls:
+            client_cls.return_value.__enter__.return_value.get.side_effect = unreachable
+            result = check_service(_fake_service(url="http://blackhole.test/"))
+        elapsed = time.monotonic() - start
+
+        assert result["status"] == "DOWN"
+        assert result["error_message"] == "timed out"
+        assert 1 <= len(connect_timeouts) <= 3
+        assert sum(connect_timeouts) <= 1.0 + 0.05
+        assert elapsed < settings.RESOLUTION_TIMEOUT_SECONDS + 1 + 1
+
+    def test_response_time_includes_resolution(self, fake_resolver: FakeResolver) -> None:
+        fake_resolver.delay = 0.2
+        with patch("app.services.monitor.httpx.Client") as client_cls:
+            client_cls.return_value.__enter__.return_value.get.return_value = _ok()
+            result = check_service(_fake_service())
+
+        assert result["response_time_ms"] >= 200
+
+
+# ---------------------------------------------------------------------------
+# Redaction and real loopback servers (spec 002 RF-11, RF-13, RF-14, RF-15)
+# ---------------------------------------------------------------------------
+
+TLS_DIR = Path(__file__).parent / "fixtures" / "tls"
+LOOPBACK = "127.0.0.1"
+
+
+def test_error_messages_never_contain_resolved_addresses(fake_resolver: FakeResolver) -> None:
+    fake_resolver.set("multi.test", "93.184.216.34", "2606:4700::1")
+    with patch("app.services.monitor.httpx.Client") as client_cls:
+        client_cls.return_value.__enter__.return_value.get.side_effect = httpx.ReadError(
+            "peer 93.184.216.34 reset, also tried [2606:4700::1]"
+        )
+        result = check_service(_fake_service(url="https://multi.test/"))
+
+    assert result["error_message"] == "peer multi.test reset, also tried [multi.test]"
+
+
+@dataclass
+class Seen:
+    requests: list[tuple[str, str | None]] = field(default_factory=list)  # (path, Host)
+    sni: list[str | None] = field(default_factory=list)
+
+
+@contextmanager
+def loopback_server(
+    status: int, location: str | None = None, tls: bool = False
+) -> Iterator[tuple[int, Seen]]:
+    seen = Seen()
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            seen.requests.append((self.path, self.headers.get("Host")))
+            self.send_response(status)
+            if location:
+                self.send_header("Location", location)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, format: str, *args: Any) -> None:
+            pass
+
+    server = HTTPServer((LOOPBACK, 0), Handler)
+    if tls:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(TLS_DIR / "monitor-test.crt", TLS_DIR / "monitor-test.key")
+
+        def record_sni(sock: ssl.SSLObject, name: str | None, ctx: ssl.SSLContext) -> None:
+            seen.sni.append(name)
+
+        context.sni_callback = record_sni
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server.server_address[1], seen
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.fixture
+def loopback_counts_as_public(
+    fake_resolver: FakeResolver, monkeypatch: pytest.MonkeyPatch
+) -> FakeResolver:
+    """Test seam: let `*.test` names resolve to loopback and treat loopback as public.
+
+    Real servers can only run on loopback here, which the spec blocks; this lets the
+    tests exercise the real HTTP/TLS path without weakening the production rule.
+    """
+    real_is_public = url_safety.is_public_address
+    loopback = ipaddress.ip_address(LOOPBACK)
+    monkeypatch.setattr(
+        url_safety, "is_public_address", lambda a: a == loopback or real_is_public(a)
+    )
+    for name in ("monitor.test", "other.test"):
+        fake_resolver.set(name, LOOPBACK)
+    return fake_resolver
+
+
+@pytest.mark.usefixtures("loopback_counts_as_public")
+class TestLoopbackChecks:
+    def test_redirect_to_private_address_is_not_followed(self) -> None:
+        with loopback_server(302, location="http://127.0.0.1/secret") as (port, seen):
+            result = check_service(_fake_service(url=f"http://monitor.test:{port}/start"))
+
+        assert (result["status"], result["status_code"]) == ("DOWN", 302)
+        assert seen.requests == [("/start", f"monitor.test:{port}")]
+
+    def test_environment_proxies_are_ignored(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "all_proxy"):
+            monkeypatch.setenv(name, "http://198.51.100.1:3128")
+        with loopback_server(204) as (port, seen):
+            result = check_service(
+                _fake_service(url=f"http://monitor.test:{port}/", expected_status=204)
+            )
+
+        assert result["status"] == "UP"
+        assert len(seen.requests) == 1
+
+    def test_tls_keeps_sni_host_and_verification_with_custom_ca(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SSL_CERT_FILE", str(TLS_DIR / "monitor-test.crt"))
+        with loopback_server(200, tls=True) as (port, seen):
+            result = check_service(_fake_service(url=f"https://monitor.test:{port}/health"))
+
+        assert result["status"] == "UP", result["error_message"]
+        assert seen.sni == ["monitor.test"]
+        assert seen.requests == [("/health", f"monitor.test:{port}")]
+
+    def test_tls_hostname_mismatch_fails_without_leaking_the_address(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SSL_CERT_FILE", str(TLS_DIR / "monitor-test.crt"))
+        with loopback_server(200, tls=True) as (port, seen):
+            result = check_service(_fake_service(url=f"https://other.test:{port}/"))
+
+        assert result["status"] == "DOWN"
+        assert "other.test" in result["error_message"]
+        assert "mismatch" in result["error_message"].lower()
+        assert LOOPBACK not in result["error_message"]
+        assert seen.requests == []

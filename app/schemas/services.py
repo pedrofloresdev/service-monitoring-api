@@ -1,19 +1,71 @@
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional, Self
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import (
+    BaseModel,
+    Field,
+    HttpUrl,
+    ModelWrapValidatorHandler,
+    PrivateAttr,
+    field_validator,
+    model_validator,
+)
+from pydantic_core import PydanticCustomError
+
+from app.services.url_safety import NOT_ALLOWED_MESSAGE, HostClass, classify_host
+
+URL_DESCRIPTION = (
+    "http(s) URL to check. Must point to a public address: loopback, private, link-local "
+    "(including cloud metadata 169.254.169.254), reserved and other non-public IPv4/IPv6 "
+    "ranges, and localhost / *.localhost are rejected with 422 (type url_not_allowed). "
+    "Hostnames are resolved on create/update and again before every check; a check whose "
+    "destination is unsafe or does not resolve is stored as DOWN without sending a request. "
+    "Checks do not follow redirects or use proxies."
+)
 
 
-class ServiceCreate(BaseModel):
+class _ServiceUrlInput(BaseModel):
+    """URL safety checks shared by create and update requests (spec 002).
+
+    Reserved names and non-public IP literals are rejected here, during request
+    validation and without DNS (RF-2). Hostnames are resolved later, in the handler.
+    """
+
+    _submitted_url: Optional[str] = PrivateAttr(default=None)
+
+    @field_validator("url", check_fields=False)
+    @classmethod
+    def _reject_unsafe_host(cls, url: Optional[HttpUrl]) -> Optional[HttpUrl]:
+        if url is not None and url.host is not None:
+            if classify_host(url.host) in (HostClass.RESERVED, HostClass.UNSAFE_LITERAL):
+                raise PydanticCustomError("url_not_allowed", NOT_ALLOWED_MESSAGE)
+        return url
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _keep_submitted_url(cls, data: Any, handler: ModelWrapValidatorHandler[Self]) -> Self:
+        model = handler(data)
+        if isinstance(data, dict) and isinstance(data.get("url"), str):
+            model._submitted_url = data["url"]
+        return model
+
+    @property
+    def submitted_url(self) -> str:
+        """The URL exactly as the client sent it (used as `input` in a 422, RF-5)."""
+        url = getattr(self, "url", None)
+        return self._submitted_url or str(url)
+
+
+class ServiceCreate(_ServiceUrlInput):
     name: str = Field(..., min_length=1, max_length=100)
-    url: HttpUrl
+    url: HttpUrl = Field(..., description=URL_DESCRIPTION)
     expected_status: int = Field(default=200, ge=100, le=599)
     check_interval: int = Field(default=60, ge=10, le=86400, description="Interval in seconds")
 
 
-class ServiceUpdate(BaseModel):
+class ServiceUpdate(_ServiceUrlInput):
     name: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    url: Optional[HttpUrl] = None
+    url: Optional[HttpUrl] = Field(default=None, description=URL_DESCRIPTION)
     expected_status: Optional[int] = Field(default=None, ge=100, le=599)
     check_interval: Optional[int] = Field(default=None, ge=10, le=86400)
     is_active: Optional[bool] = None

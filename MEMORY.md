@@ -1,12 +1,16 @@
 # Memory - Service Monitoring API
 
 ## Current state
+- 2026-11-12: specs 000 and 001 merged to `master` (PR #1, `503610b`); push CI run 43315795094 green with all 5 checks. Both specs fully validated.
+- 2026-11-12: ruleset `protect-master` (id 27159769) active on `master`: no deletion, no force push, PR required (0 approvals, solo owner), required checks `lint`, `format`, `typecheck`, `test`, `migrations`; no bypass. Direct pushes to `master` are rejected.
 - v1.0 works: service CRUD (`/api/v1/services`), paginated metrics with time filter (`/api/v1/metrics/services/{id}`), aggregated status (`/api/v1/status`), `/health` liveness.
 - Architecture: FastAPI routes -> services layer -> SQLAlchemy 2 sync models on PostgreSQL. APScheduler BackgroundScheduler runs one interval job per active service, started/stopped in the FastAPI lifespan. A service is DOWN after `FAIL_THRESHOLD` consecutive failed checks.
 - Tests: 71 default tests (in-memory SQLite, scheduler mocked, coverage 88.41%, floor 88) plus 12 `postgres`-marked tests (migrations + endpoints on PostgreSQL, run with `TEST_POSTGRES_URL`).
 - Known gaps: transitive dependencies not locked, the default test suite does not run on Postgres (only migrations + endpoint checks do; full parity is roadmap 004), no authentication, no metrics retention, obsolete `version:` key in docker-compose.yml.
 - Known gap (constitution P3): default `check_interval` is hardcoded `60` in schema and model (the unused `SCHEDULER_INTERVAL_SECONDS` was removed in 000). Roadmap candidate: make the default interval a setting.
 - Known gap (constitution P7): hardcoded Postgres credentials in docker-compose.yml. Not an approved exception; future spec.
+- Known gap (found in 002 clarify): `PATCH` with `url: null` passes the schema (Optional) and already fails per the clarify review (exact failure not verified); pre-existing, out of 002 scope, future spec.
+- Known gap (found in 002 clarify pass 2): `PATCH` to a URL that duplicates another service hits the unique constraint and returns 500 instead of 409 (only create checks duplicates). Pre-existing, out of 002 scope, future spec.
 - Spec 000-foundations: approved 2026-11-12 after two `/sdd-clarify` passes. Plan approved 2026-11-12.
 - 000 baseline (Python 3.11.18, master): 50 tests, 281/319 statements = 88.09% -> coverage floor 88 (`fail_under=88`, `precision=2`). Margin is thin: one new uncovered statement fails the gate.
 - Docker is reachable from WSL (Docker Desktop integration enabled 2026-11-12; server 29.2.1, Compose v2.40.3), so compose checks (RNF-1d, RNF-5) can run here.
@@ -30,13 +34,22 @@
 
 - 2026-11-12: validation verdicts: 001 SPEC FULFILLED; 000 SPEC FULFILLED EXCEPT RF-6 (post-merge). Old template `docs/workflow-guide.md` (deleted in harness commit 19b941c) replaced by a guide for the current SDD workflow; sdd skill now documents validation.md, measuring before planning, per-task commits and mid-task bug handling.
 
+- Spec 002-url-safety drafted 2026-11-12 (SSRF: today any http(s) URL is accepted, incl. localhost/private/169.254.169.254). Owner decisions: block all non-public addresses, no allow-list; validate on create/update (resolve hostnames) AND before every check (DNS rebinding), request only to the validated address; blocked check = DOWN metric with fixed error prefix; existing unsafe services kept untouched; unresolvable host accepted at registration; redirects stay unfollowed. Clarify pass 1 (33 items) applied: closed blocked-range table from IANA registries (+ NAT64/6to4/Teredo/multicast, all IPv6 outside 2000::/3), `localhost`/`*.localhost` rejected by name, Host/SNI/cert keep the original hostname, env proxies ignored, no resolved IPs in errors, 422 in existing validation format beats 404/409, new resolution-timeout setting (default 2s), tests may only gain a fake resolver. Clarify pass 2 (19 items) applied: URL check split (reserved names/literals in request validation -> 422 before 404; DNS check after service lookup, off the event loop -> 422 after 404, before 409; /health and /status must answer <500 ms during a slow create); connect attempts share one budget = check timeout; NAT64 64:ff9b::/96 judged by embedded IPv4 (reversal, for DNS64); two fixed 'unsafe destination:' messages; resolution timeout decimal 0<x<=30, invalid stops startup; custom CA env vars still honored, proxies/.netrc ignored; RNF-1 lists exceptions; existing tests may change setup/doubles but not asserted outcomes; default test run guarded against DNS and non-loopback connections. Roadmap shifts: retention 003, alerting 004, pg-parity 005, api-auth 006 (docs/SPEC.md roadmap renumbered on approval 2026-11-12).
+
+- 2026-11-23: spec 002 first validation found 6 issues (RF-7 check-time host normalization for legacy rows, RF-17 docs, RNF-6 partial-DNS tests, offline-run record, README, plan note); fixed and re-validated SPEC FULFILLED. RF-17 amended (owner): detailed URL-safety reference only in docs/architecture.md.
+- 2026-11-23: /usage showed `reviewer` subagents at 29% of usage (they inherited Opus). PR #6 sets `model: sonnet`; the 002 re-validation already ran on Sonnet and was adequate for a focused re-check, but it relied on earlier results for requirements outside the findings. If clarify reviews get shallower, split clarify (Opus) and validate (Sonnet).
+
 ## Lessons / mistakes to avoid
+- Validate check-time inputs with the same parser/normalization as registration: rows can be written outside the API.
 - Run `ruff format --check` before every push, including throwaway commits: an over-long comment broke the isolation of a CI validation run.
 - Tests build tables with `create_all` from the models, so migration-vs-model drift is invisible to pytest; only a real `alembic upgrade head` on Postgres (compose) reveals it. Always smoke-test the write path end to end, not only `/health`.
+- Compose needs a `.env` (env_file); none exists in the working tree. For manual runs copy `.env.example` temporarily and delete it after; clean up test rows created in the persistent DB volume.
+- Python `ipaddress.is_global` is not a safe SSRF filter (treats `::7f00:1`, `64:ff9b::a00:1` as global); use an explicit table. httpx/ssl error texts can embed the connected IP: redact.
+- A resolver thread must catch every exception (not only OSError), or an odd failure silently turns into a full-timeout wait.
 - Formatter/linter edits touch every file: a spec that restricts sensitive areas to "annotation-only" must also allow mechanical (format/import) changes, or it is impossible to satisfy.
 - FastAPI uses route return annotations as response models: typing routes without `response_model` can silently change OpenAPI.
 
 ## Next steps
-- Owner: merge PR #1 (`feature/000-foundations` -> `master`, carries 000 + 001 + SDD guide; marked ready 2026-11-12, all 5 checks green on `a5be382`).
-- After merge: confirm the push-to-`master` CI run (000 RF-6) and record it in `specs/000-foundations/validation.md`; mark the 5 checks as required in branch protection (owner, manual).
-- Next spec candidates (roadmap): 002-metrics-retention; also make the default `check_interval` a setting (P3 gap) and move compose credentials out of the file (P7 gap).
+- Owner: merge PR #5 (spec 002, URL safety; validated SPEC FULFILLED 2026-11-23). It also carries the spec 000 sign-off from PR #4 (merged into the 002 branch on 2026-11-23), so PR #4 can be merged first or simply closed. Merge PR #6 (`reviewer` agent on Sonnet) independently.
+- PR #1 is merged; RF-6 verified on push run 43315795094; branch protection ruleset `protect-master` is active.
+- Then roadmap: 003-metrics-retention; also make the default `check_interval` a setting (P3 gap) and move compose credentials out of the file (P7 gap). Start with `/sdd-spec`.

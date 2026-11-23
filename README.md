@@ -1,6 +1,6 @@
 # Service Monitoring API
 
-A production-ready backend system that monitors external and internal services, tracks uptime, and delivers real-time observability through automated health checks and performance metrics.
+A production-ready backend system that monitors publicly reachable HTTP services, tracks uptime, and delivers real-time observability through automated health checks and performance metrics.
 
 ---
 
@@ -239,6 +239,7 @@ All settings are loaded from `.env` via `pydantic-settings`. `.env.example` list
 | `DATABASE_URL` | *(required)* | PostgreSQL connection string |
 | `FAIL_THRESHOLD` | `3` | Consecutive failures before marking a service DOWN |
 | `CHECK_TIMEOUT_SECONDS` | `10` | HTTP request timeout per check |
+| `RESOLUTION_TIMEOUT_SECONDS` | `2` | Maximum time to resolve a service hostname (IPv4 and IPv6 together) on create/update and before every check; decimal, > 0 and <= 30 |
 
 The default `check_interval` for a new service (60 seconds) is fixed in code, not a setting; each service can set its own interval (10–86400 seconds).
 
