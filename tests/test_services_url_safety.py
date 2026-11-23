@@ -1,5 +1,6 @@
 """URL safety on POST/PATCH /api/v1/services (spec 002 RF-1 to RF-5, RNF-4)."""
 
+import socket
 import threading
 import time
 from typing import Any
@@ -12,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.models.services import Service
 from app.services.url_safety import NOT_ALLOWED_MESSAGE
-from tests.conftest import FakeResolver
+from tests.conftest import FakeResolver, PartialDns
 
 BASE = "/api/v1/services"
 
@@ -162,6 +163,49 @@ class TestHostnameCheck:
         schedule.assert_not_called()
         for address in addresses:
             assert address not in resp.text  # RF-15
+
+    @pytest.mark.parametrize(
+        ("family", "address"),
+        [(socket.AF_INET, "10.0.0.5"), (socket.AF_INET6, "fd00::5")],
+        ids=["private-ipv4-ipv6-fails", "private-ipv6-ipv4-fails"],
+    )
+    def test_create_with_partial_answer_containing_private_address_is_rejected(
+        self,
+        client: TestClient,
+        db_session: Session,
+        partial_dns: PartialDns,
+        family: int,
+        address: str,
+    ) -> None:
+        # Real resolver: one family returns a private address, the other lookup fails (RNF-6).
+        partial_dns(family, address)
+        submitted = "http://partial.test/status"
+
+        with patch("app.api.v1.services.schedule_service") as schedule:
+            resp = client.post(BASE, json=_payload(submitted))
+
+        assert resp.status_code == 422
+        assert resp.json() == {"detail": [_url_error(submitted)]}
+        assert db_session.query(Service).count() == 0
+        schedule.assert_not_called()
+        assert address not in resp.text  # RF-15
+
+    def test_update_with_partial_answer_containing_private_address_is_rejected(
+        self, client: TestClient, db_session: Session, partial_dns: PartialDns
+    ) -> None:
+        svc = _store(db_session, "https://public.example/")
+        partial_dns(socket.AF_INET, "192.168.1.20")
+        submitted = "http://partial.test/status"
+
+        with patch("app.api.v1.services.schedule_service") as schedule:
+            resp = client.patch(f"{BASE}/{svc.id}", json={"url": submitted})
+
+        assert resp.status_code == 422
+        assert resp.json() == {"detail": [_url_error(submitted)]}
+        db_session.refresh(svc)
+        assert svc.url == "https://public.example/"
+        schedule.assert_not_called()
+        assert "192.168.1.20" not in resp.text
 
     @pytest.mark.parametrize("error", ["name not found", "timed out", "lookup failed"])
     def test_unresolvable_hostname_is_accepted(

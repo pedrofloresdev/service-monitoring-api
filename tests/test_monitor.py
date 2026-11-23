@@ -5,6 +5,7 @@ in isolation — no real HTTP calls, mocked via httpx.
 """
 
 import ipaddress
+import socket
 import ssl
 import threading
 import time
@@ -31,7 +32,7 @@ from app.services.url_safety import (
     UNSAFE_LITERAL_MESSAGE,
     UNSAFE_RESOLVED_MESSAGE,
 )
-from tests.conftest import PUBLIC_TEST_ADDRESS, FakeResolver, make_metric
+from tests.conftest import PUBLIC_TEST_ADDRESS, FakeResolver, PartialDns, make_metric
 
 
 def _fake_service(url: str = "https://example.com/health", expected_status: int = 200) -> Service:
@@ -242,6 +243,35 @@ class TestCheckTimeDestination:
         _assert_failed_without_request(result, client_cls)
         assert result["error_message"] == UNSAFE_RESOLVED_MESSAGE
         assert fake_resolver.calls == ["internal.test"]
+
+    def test_partial_answer_with_private_ipv4_is_blocked(self, partial_dns: PartialDns) -> None:
+        # Real resolver: IPv4 returns a private address, the IPv6 lookup fails (RNF-6).
+        partial_dns(socket.AF_INET, "10.0.0.5")
+
+        with patch("app.services.monitor.httpx.Client") as client_cls:
+            result = check_service(_fake_service(url="https://partial.test/health"))
+
+        _assert_failed_without_request(result, client_cls)
+        assert result["error_message"] == UNSAFE_RESOLVED_MESSAGE
+        assert "10.0.0.5" not in result["error_message"]
+
+    def test_partial_answer_with_public_ipv4_is_sent_only_to_that_address(
+        self, partial_dns: PartialDns
+    ) -> None:
+        # Real resolver: IPv4 returns a public address, the IPv6 lookup fails (RNF-6).
+        partial_dns(socket.AF_INET, "93.184.216.34")
+
+        with patch("app.services.monitor.httpx.Client") as client_cls:
+            get = client_cls.return_value.__enter__.return_value.get
+            get.return_value = _ok()
+            result = check_service(_fake_service(url="https://partial.test/health"))
+
+        assert result["status"] == "UP"
+        assert get.call_count == 1
+        args, kwargs = get.call_args
+        assert args[0] == httpx.URL("https://93.184.216.34/health")
+        assert kwargs["headers"] == {"Host": "partial.test"}
+        assert kwargs["extensions"] == {"sni_hostname": "partial.test"}
 
     @pytest.mark.parametrize("error", ["name not found", "timed out", "lookup failed"])
     def test_unresolvable_hostname_fails_without_request(

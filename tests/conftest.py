@@ -6,7 +6,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 import ipaddress  # noqa: E402
 import socket  # noqa: E402
 import time  # noqa: E402
-from collections.abc import Iterator  # noqa: E402
+from collections.abc import Callable, Iterator  # noqa: E402
 from dataclasses import dataclass, field  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
 from typing import Any  # noqa: E402
@@ -112,6 +112,30 @@ def fake_resolver(monkeypatch: pytest.MonkeyPatch) -> FakeResolver:
     resolver = FakeResolver()
     monkeypatch.setattr(url_safety, "resolve_host", resolver)
     return resolver
+
+
+# Captured at import, before the autouse fake_resolver replaces it.
+REAL_RESOLVE_HOST = url_safety.resolve_host
+
+PartialDns = Callable[[int, str], None]
+
+
+@pytest.fixture
+def partial_dns(monkeypatch: pytest.MonkeyPatch) -> PartialDns:
+    """Run the REAL resolver over a fake getaddrinfo where one family answers and the
+    other fails (spec 002 RNF-6 partial answers). Call it as partial_dns(family, address)."""
+    monkeypatch.setattr(url_safety, "resolve_host", REAL_RESOLVE_HOST)
+
+    def install(answered_family: int, address: str) -> None:
+        def fake_getaddrinfo(host: Any, port: Any, family: int, *args: Any) -> Any:
+            if family == answered_family:
+                sockaddr = (address, 0) if family == socket.AF_INET else (address, 0, 0, 0)
+                return [(family, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", sockaddr)]
+            raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+
+        monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    return install
 
 
 # ---------------------------------------------------------------------------
