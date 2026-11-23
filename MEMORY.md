@@ -1,6 +1,8 @@
 # Memory - Service Monitoring API
 
 ## Current state
+- 2026-11-12: specs 000 and 001 merged to `master` (PR #1, `503610b`); push CI run 43315795094 green with all 5 checks. Both specs fully validated.
+- 2026-11-12: ruleset `protect-master` (id 27159769) active on `master`: no deletion, no force push, PR required (0 approvals, solo owner), required checks `lint`, `format`, `typecheck`, `test`, `migrations`; no bypass. Direct pushes to `master` are rejected.
 - v1.0 works: service CRUD (`/api/v1/services`), paginated metrics with time filter (`/api/v1/metrics/services/{id}`), aggregated status (`/api/v1/status`), `/health` liveness.
 - Architecture: FastAPI routes -> services layer -> SQLAlchemy 2 sync models on PostgreSQL. APScheduler BackgroundScheduler runs one interval job per active service, started/stopped in the FastAPI lifespan. A service is DOWN after `FAIL_THRESHOLD` consecutive failed checks.
 - Tests: 71 default tests (in-memory SQLite, scheduler mocked, coverage 88.41%, floor 88) plus 12 `postgres`-marked tests (migrations + endpoints on PostgreSQL, run with `TEST_POSTGRES_URL`).
@@ -48,6 +50,6 @@
 - FastAPI uses route return annotations as response models: typing routes without `response_model` can silently change OpenAPI.
 
 ## Next steps
-- Owner: merge PR #5 (spec 002, URL safety; validated SPEC FULFILLED 2026-11-23, marked ready), PR #4 (spec 000 sign-off, docs only) and PR #6 (`reviewer` agent on Sonnet).
-- PR #1 is merged; RF-6 verified on push run 43315795094; branch protection ruleset `protect-master` is active (recorded in PR #4).
-- Then roadmap: 003-metrics-retention; also make the default `check_interval` a setting (P3 gap) and move compose credentials out of the file (P7 gap).
+- Owner: merge PR #5 (spec 002, URL safety; validated SPEC FULFILLED 2026-11-23). It also carries the spec 000 sign-off from PR #4 (merged into the 002 branch on 2026-11-23), so PR #4 can be merged first or simply closed. Merge PR #6 (`reviewer` agent on Sonnet) independently.
+- PR #1 is merged; RF-6 verified on push run 43315795094; branch protection ruleset `protect-master` is active.
+- Then roadmap: 003-metrics-retention; also make the default `check_interval` a setting (P3 gap) and move compose credentials out of the file (P7 gap). Start with `/sdd-spec`.
