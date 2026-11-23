@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+from pydantic_core import Url
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -98,7 +99,10 @@ def check_service(service: Service) -> dict[str, Any]:
     host = ""
     destination = _Destination()
     try:
-        url = httpx.URL(str(service.url))
+        # Parse with the same URL parser as registration, so a row stored outside the API
+        # gets the same host normalization (IPv4 notations, IDNA mapping) before the
+        # safety decision (spec 002 RF-7). A no-op for URLs stored through the API.
+        url = httpx.URL(str(Url(str(service.url))))
         host = url_safety.normalize_host(url.raw_host.decode("ascii"))
         destination = _destination(host)
         if destination.problem is not None:

@@ -206,6 +206,29 @@ class TestCheckTimeDestination:
         assert fake_resolver.calls == []
 
     @pytest.mark.parametrize(
+        "url",
+        [
+            "http://2130706433:8000/x",  # decimal 127.0.0.1
+            "http://0x7f000001/",  # hex 127.0.0.1
+            "http://127.1/",  # short form of 127.0.0.1
+            "http://0/",  # 0.0.0.0
+            "http://ｌｏｃａｌｈｏｓｔ/",  # full-width localhost
+            "http://local­host/",  # soft hyphen inside localhost
+        ],
+    )
+    def test_legacy_row_host_is_normalized_like_registration(
+        self, fake_resolver: FakeResolver, url: str
+    ) -> None:
+        # Rows written outside the API skip request validation; the check must still
+        # normalize the host as registration does and give the RF-7 result.
+        with patch("app.services.monitor.httpx.Client") as client_cls:
+            result = check_service(_fake_service(url=url))
+
+        _assert_failed_without_request(result, client_cls)
+        assert result["error_message"] == UNSAFE_LITERAL_MESSAGE
+        assert fake_resolver.calls == []
+
+    @pytest.mark.parametrize(
         "addresses", [("10.0.0.5",), ("93.184.216.34", "10.0.0.5"), ("2606:4700::1", "fe80::1")]
     )
     def test_hostname_resolving_to_non_public_is_blocked(
