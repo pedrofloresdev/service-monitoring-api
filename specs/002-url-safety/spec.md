@@ -1,6 +1,6 @@
 # 002 - URL safety
 
-Status: approved (2026-11-12, after two `/sdd-clarify` passes)
+Status: implemented (2026-11-23; validated: SPEC FULFILLED after one round of fixes)
 Change (2026-11-23, owner-approved via /sdd-change after /sdd-validate): RF-17 keeps the detailed URL safety reference only in `docs/architecture.md`; `docs/SPEC.md` summarizes and links to it, so the two cannot drift.
 
 ## Context and goal

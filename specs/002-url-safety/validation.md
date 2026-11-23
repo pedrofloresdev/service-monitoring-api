@@ -1,5 +1,11 @@
 # Validation - 002 URL safety
 
+**Verdict (2026-11-23): SPEC FULFILLED.**
+- First `/sdd-validate` (reviewer on Opus): 6 findings. RF-7 check-time host normalization; RF-17 docs/SPEC.md content; RNF-6 partial-DNS tests; RNF-7 offline-run record; stale README lines; plan as-built note.
+- Fixes: `ea8062e` (RF-7 fix + 6 legacy-row tests), `b140508` (5 partial-DNS tests on the real resolver, mutation-checked), `8f06e86` (README, unshare record, plan note), `4e01ae3` (owner-approved RF-17 amendment).
+- Re-validation (reviewer on Sonnet): all 6 resolved, including a live check that legacy rows `http://2130706433:8000/x`, `http://0x7f000001/`, `http://127.1/`, `http://0/` and full-width `localhost` store the exact RF-7 message with no request sent. Gates: ruff, format, mypy, pytest 333 passed (94.87%), schema check clean, 12 postgres tests, `unshare -rn sh -c 'ip link set lo up && pytest'` 333 passed. Public URLs still check UP (RNF-1).
+- CI after the fixes: PR #5 run 45276394882 on `4e01ae3` (success, 2026-11-23T22:06:29Z to 2026-11-23T22:07:13Z), all 5 checks pass.
+
 Branch `feature/002-url-safety`, local evidence collected 2026-11-12 on WSL2 (Python 3.11, Docker 29.2.1 / Compose v2.40.3). `/sdd-validate` re-runs everything rather than trusting this file.
 
 Commits: `de71108` (spec/plan/tasks), T1 `b6d797b`, T2 `08106fc`, T3 `3424ccc`, T4 `0f0558c`, T5 `ee75291`, T6 `228a5ef`, T7 `ebe869c`, T8 `3f835dd`, T9 `745da12`.
@@ -39,4 +45,4 @@ Commits: `de71108` (spec/plan/tasks), T1 `b6d797b`, T2 `08106fc`, T3 `3424ccc`, 
 ## Notes
 - The test TLS key pair under `tests/fixtures/tls/` is owner-approved (plan D10) and used only by loopback tests.
 - During planning, one probe line resolved `example.com` through real DNS; no other probe used the network.
-- T9 ticked 2026-11-23 (Mermaid render confirmed, PR #5). T10 stays unticked until `/sdd-validate 002-url-safety` passes.
+- T9 ticked 2026-11-23 (Mermaid render confirmed, PR #5). T10 ticked 2026-11-23 after re-validation passed.
