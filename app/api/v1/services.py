@@ -16,8 +16,10 @@ router = APIRouter(prefix=PREFIX, tags=[NAME])
 def create_service(payload: ServiceCreate, db: Session = Depends(get_db)) -> Service:
     try:
         service = service_writes.create_service(db, payload)
-    except service_writes.DuplicateUrl:
-        raise _duplicate() from None
+    except service_writes.DemoIntervalTooLow as exc:
+        raise _interval(exc) from None
+    except (service_writes.DuplicateUrl, service_writes.DemoCapReached) as exc:
+        raise _conflict(exc) from None
     schedule_service(service)
     return service
 
@@ -46,8 +48,12 @@ def update_service(
         service = service_writes.update_service(db, service_id, payload)
     except service_writes.ServiceNotFound:
         raise _not_found() from None
-    except service_writes.DuplicateUrl:
-        raise _duplicate() from None
+    except service_writes.ServiceProtected as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=exc.message) from None
+    except service_writes.DemoIntervalTooLow as exc:
+        raise _interval(exc) from None
+    except (service_writes.DuplicateUrl, service_writes.DemoCapReached) as exc:
+        raise _conflict(exc) from None
     # Only after a successful commit (spec 003a RF-16).
     if service.is_active:
         schedule_service(service)
@@ -62,6 +68,8 @@ def delete_service(service_id: int, db: Session = Depends(get_db)) -> None:
         service_writes.delete_service(db, service_id)
     except service_writes.ServiceNotFound:
         raise _not_found() from None
+    except service_writes.ServiceProtected as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=exc.message) from None
     unschedule_service(service_id)  # after the commit, so a failed delete keeps its schedule
 
 
@@ -69,7 +77,20 @@ def _not_found() -> HTTPException:
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
 
 
-def _duplicate() -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_409_CONFLICT, detail="A service with this URL already exists"
-    )
+DUPLICATE_MESSAGE = "A service with this URL already exists"
+
+
+def _conflict(exc: Exception) -> HTTPException:
+    detail = exc.message if isinstance(exc, service_writes.DemoCapReached) else DUPLICATE_MESSAGE
+    return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+
+
+def _interval(exc: service_writes.DemoIntervalTooLow) -> HTTPException:
+    """Same shape as request-validation errors, with a single entry (spec 003a RF-13)."""
+    error = {
+        "type": "demo_interval_too_low",
+        "loc": ["body", "check_interval"],
+        "msg": exc.message,
+        "input": exc.value,
+    }
+    return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=[error])

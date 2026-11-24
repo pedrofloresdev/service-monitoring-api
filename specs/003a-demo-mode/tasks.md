@@ -64,7 +64,7 @@ Rules for every task:
     - A failed write leaves the row and the schedule unchanged.
     - All existing tests pass unchanged, the OpenAPI JSON is identical, and all quality checks are green.
 
-- [ ] **T7. Demo write rules: origin, interval, protection, caps, order.** Make these changes in the write flows (plan §7.2–§7.4):
+- [x] **T7. Demo write rules: origin, interval, protection, caps, order.** Make these changes in the write flows (plan §7.2–§7.4):
   - Add the demo branches: origin `visitor`, the RF-12 default interval, RF-13, 403 protection, the global and per-host caps.
   - Add the `cap_guard` atomic step: a PostgreSQL advisory lock, or a threading lock on other databases (D4).
   - Add the domain exceptions, and their handlers in `app/main.py`, with the exact bodies from plan §5.
