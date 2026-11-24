@@ -1,6 +1,6 @@
 # 003c - Demo mode: periodic reset and notice
 
-Status: draft (revised 2026-11-24 after `/sdd-clarify` pass 4)
+Status: draft (revised 2026-11-24 after `/sdd-clarify` pass 5)
 
 ## Context and goal
 Spec 003a adds demo mode: seeded services, protection and caps on visitor services. Nothing returns the demo to a known state, so after a few days it shows whatever visitors left behind.
@@ -39,8 +39,8 @@ Read once at startup, validated only while demo mode is on (003a RF-2). Integers
 | Due-reset poll interval (`DEMO_RESET_POLL_SECONDS`) | 60 | integer 10 to 3,600 |
 | Reset retry delay (`DEMO_RESET_RETRY_MINUTES`) | 10 | integer 1 to 1,440 |
 | Reset maximum duration (`DEMO_RESET_MAX_SECONDS`) | 30 | integer 1 to 600 |
-| Write wait during a reset (`DEMO_RESET_WRITE_WAIT_SECONDS`) | 5 | integer 0 to 60 |
-| Maximum waiting writes (`DEMO_RESET_MAX_WAITING_WRITES`) | 10 | integer 0 to 100 |
+| Write wait during a reset (`DEMO_RESET_WRITE_WAIT_SECONDS`) | 5 | integer 1 to 60 |
+| Maximum waiting writes (`DEMO_RESET_MAX_WAITING_WRITES`) | 10 | integer 1 to 100 |
 
 ## Functional requirements
 
@@ -60,11 +60,12 @@ Read once at startup, validated only while demo mode is on (003a RF-2). Integers
 - RF-4: WHEN a reset starts, THE SYSTEM SHALL fix the slot it serves as the current slot at that moment, then:
   - close the gate to new writes (RF-7);
   - wait for writes in progress to finish, up to the write wait setting. IF they haven't finished by then, THEN the attempt is a failed reset (RF-9) and the gate opens again;
-  - in one database transaction: delete every visitor service and its stored checks, apply 003a RF-5 to the seeded services, and store the fixed slot as the last completed slot.
+  - in one database transaction: delete every visitor service and, explicitly, its stored checks (not relying on the database's cascade), apply 003a RF-5 to the seeded services, and store the fixed slot as the last completed slot;
+  - just before committing, confirm that this process still holds the demo lock (003d). If not, roll back, and the attempt is a failed reset.
 
   The data changes and the slot are committed together or not at all. Seeded and ordinary services and their stored checks are kept.
 - RF-5: WHEN a reset's transaction commits, THE SYSTEM SHALL:
-  - bring the schedules in line with the database: every active service has exactly one schedule, at its current check interval, and no schedule exists for a deleted or inactive service;
+  - bring the schedules in line with the database: every active service has exactly one schedule, at its current check interval, and no schedule exists for a deleted or inactive service. Schedules that are already correct are left untouched, so their timers don't restart. Reconciliation and the schedule changes made by create, update and delete requests take turns, one at a time, and reconciliation reads the database only after it has its turn, so it never undoes a newer change. Seeded services created, adopted or reactivated by the reset get their immediate first check (003a RF-8);
   - notify 003b, which clears its per-client attribution in memory;
   - open the gate.
 
@@ -75,22 +76,22 @@ Read once at startup, validated only while demo mode is on (003a RF-2). Integers
   - at every due-reset poll interval;
   - when a retry delay ends.
 
-  WHEN a reset is due and none is running, THE SYSTEM SHALL start one. At most one reset runs at a time. A slot or poll that arrives during a reset, or while a retry is pending, starts nothing; the retry, or the next check after the reset ends, decides. Several missed slots lead to a single reset. The demo jobs run separately from the check jobs, so busy check workers never delay or skip them. A demo job that runs late still runs. A slot missed while running (a paused machine, a clock jump forward) is caught up at most one poll interval late.
+  WHEN a reset is due and none is running, THE SYSTEM SHALL start one. At most one reset runs at a time. A slot or poll that arrives during a reset, or while a retry is pending, starts nothing; the retry, or the next check after the reset ends, decides. Several missed slots lead to a single reset. The demo jobs run in their own scheduler, separate from the check jobs, so busy check workers never delay or skip them. A demo job that runs late, by up to the poll interval, still runs. Several late runs of the same job collapse into one. A slot missed while running (a paused machine, a clock jump forward) is caught up at most one poll interval late.
 - RF-7: WHILE the gate is closed, THE SYSTEM SHALL keep serving non-write requests normally. A write request that arrives SHALL:
   - be checked for rate limits first (003b), so a 429 is never held;
   - IF the number of writes already waiting has reached the maximum waiting writes, THEN get `503` at once;
   - otherwise wait up to the write wait setting for the gate to open. IF it opens, THEN the write is processed normally, with every check (404, 403, caps, duplicates) evaluated after the reset. IF not, THEN `503`.
 
-  A `503` has `Retry-After: 5` and `{"detail": "Demo reset in progress. Retry in a few seconds."}`, and the write isn't processed. Waiting writes don't reduce the capacity available to non-write requests.
-- RF-8: THE SYSTEM SHALL give every statement of a reset's transaction a database-enforced timeout equal to the reset maximum duration, and SHALL check the elapsed time between statements. IF a statement times out or the elapsed time exceeds the maximum, THEN the transaction is rolled back and the reset is a failed reset (RF-9). A reset therefore holds the database for less than twice the maximum duration. The system SHALL not interrupt a reset in any other way, except that 003d RF-7's exit on lock loss ends the connection, which rolls the transaction back.
+  A `503` has `Retry-After` equal to the write wait setting, and `{"detail": "Demo reset in progress. Retry in a few seconds."}`. The write isn't processed. The gate and the wait sit right after 003b's rate check, before routing, and the wait doesn't occupy a request worker. So waiting writes don't reduce the capacity available to non-write requests.
+- RF-8: THE SYSTEM SHALL give every statement of a reset's transaction a database-enforced timeout equal to the reset maximum duration, SHALL set the session's idle-in-transaction timeout to the same value (so a stall between statements is also rolled back by the database), and SHALL check the elapsed time, measured from the transaction's first statement, between statements. IF a statement times out or the elapsed time exceeds the maximum, THEN the transaction is rolled back and the reset is a failed reset (RF-9). A reset therefore holds the database for less than twice the maximum duration. The system SHALL not interrupt a reset in any other way, except that 003d RF-7's exit on lock loss ends the connection, which rolls the transaction back.
 - RF-9: IF a reset fails (an error, a timeout, RF-4's write wait or RF-8's limit), THEN THE SYSTEM SHALL:
   - log the failure;
   - leave the database as it was before that reset;
   - end the reset as in RF-5;
   - keep serving and checking;
   - retry after the reset retry delay, and keep retrying at that delay while a reset is still due.
-- RF-10: WHEN a check finishes for a service that no longer exists, deleted by a reset or by a delete request, THE SYSTEM SHALL store nothing for it, and SHALL log it at warning level, not as an error. This applies whether demo mode is on or off (RNF-1). On PostgreSQL, service ids are never reused, so a late result can never attach to another service.
-- RF-11: THE SYSTEM SHALL compute slots and due resets only from the application's UTC clock, using time-zone-aware values. The database clock is not used. At every due check, IF the stored last completed slot is later than now (the clock moved back), THEN THE SYSTEM SHALL log a warning and replace it with the current slot without running a reset.
+- RF-10: WHEN a check finishes for a service that no longer exists, deleted by a reset or by a delete request, THE SYSTEM SHALL store nothing for it, and SHALL log it at warning level, not as an error. This applies whether demo mode is on or off (RNF-1). On PostgreSQL, service ids are never reused, so a late result can never attach to another service. On SQLite (development and tests only, since demo mode requires PostgreSQL per 003d), the check confirms the service still exists in the same transaction before storing. Id reuse after a delete remains possible there, which is documented and accepted.
+- RF-11: THE SYSTEM SHALL compute slots and due resets only from the application's UTC clock, using time-zone-aware values. The database clock is not used. At every due check, IF the stored last completed slot is later than now (the clock moved back), THEN THE SYSTEM SHALL log a warning and replace it with the current slot without running a reset. This replacement takes turns with resets, so it never overlaps one. Visitor data from before the clock jump stays until the next slot. Accepted.
 
 ### Demo notice
 - RF-12: WHILE demo mode is on, THE SYSTEM SHALL add two fields to the API info response (`GET /`) for every request:
@@ -100,7 +101,7 @@ Read once at startup, validated only while demo mode is on (003a RF-2). Integers
     - when due or running: the current time;
     - when a retry is pending: the retry time.
 
-  The existing fields don't change. While demo mode is off, neither field is present. `GET /` keeps no response schema in the API schema document, as decided in spec 000, so the document stays identical.
+  The state comes from the process's memory (the last completed slot is loaded at startup and updated on every commit, plus the reset state), so `GET /` never queries the database and still answers when the database is down. The existing fields don't change. While demo mode is off, neither field is present. `GET /` keeps no response schema in the API schema document, as decided in spec 000, so the document stays identical.
 
 ### Shutdown, switching off and documentation
 - RF-13: WHEN the process stops (a stop signal, or 003d's exit on lock loss) during a reset, THE SYSTEM SHALL let the database roll back the uncommitted transaction. The slot is not stored, so the next start catches up (RF-6). Writes that were waiting are not processed.
@@ -171,6 +172,8 @@ This is a standing exception to constitution principle 1 ("never ... drop ... a 
 - Check jobs inserting results while a reset deletes their service: they wait for the reset's transaction, which RF-8 bounds, then store nothing (RF-10).
 - A visitor retries a 503 at once several times: each attempt counts toward 003b's write limit, so it may get a 429. Documented.
 - A read request that overlaps a reset may see some data from before and some from after. Only that request is affected. Accepted.
+- Demo mode is switched off and on again within the same slot: no reset is due, so visitor services left from before stay until the next slot. Accepted and documented.
+- The lock is lost while a reset runs: the reset checks the lock just before committing (RF-4), and the process exits soon after (003d RF-7). A commit can only slip through if the lock is lost in the instant between that check and the commit. Accepted as part of 003d's documented overlap.
 
 ## Out of scope
 - The start command and lock (003d), rate limits (003b), seeding and caps (003a).
@@ -202,6 +205,19 @@ Earlier decisions (F series where still applicable, and J1 to J16) still apply u
 - **N13 (3.4) – drifting slots:** the goal now says "fixed UTC slots", and the drift for intervals that don't divide 24 is documented.
 - **N14 (4.2) – constitution approval:** the exact question and answer are quoted in the exception section.
 - **N15 (2.2 of 003d) – interruption by lock loss:** allowed explicitly (RF-8, RF-13).
+
+- **S1 (1.1) – gate placement:** right after the rate check, before routing, without occupying a request worker, so the capacity claim holds.
+- **S2 (1.2, 1.6) – reconciliation vs requests:** reconciliation and request schedule changes take turns, and reconciliation reads the database only after it has its turn. Correct schedules are left untouched, so timers don't restart.
+- **S3 (1.3) – notice state:** kept in memory, so `GET /` never queries the database.
+- **S4 (1.4, 2.1) – elapsed time and stalls:** elapsed time is measured from the transaction's first statement. An idle-in-transaction timeout makes the database also roll back stalls between statements, so the bound holds even if the process hangs.
+- **S5 (1.5) – demo jobs:** their own scheduler. A run up to one poll interval late still runs, and repeated late runs collapse into one.
+- **S6 (2.2) – lock loss vs commit:** the lock is checked just before committing. The remaining instant is part of 003d's documented overlap.
+- **S7 (3.1) – clock-back replacement:** takes turns with resets. The leftover visitor data is accepted.
+- **S8 (3.2) – SQLite:** checks are deleted explicitly, and a late check confirms its service still exists before storing. Id reuse on SQLite is accepted (development and tests only).
+- **S9 (3.3) – off and on within one slot:** leftovers stay until the next slot. Accepted and documented.
+- **S10 (3.4) – zero values:** the write wait and the waiting-writes limit now start at 1.
+- **S11 (4.1) – `Retry-After`:** equals the write wait setting instead of a hardcoded 5.
+- **S12 (3.3 of 003a) – seeds created at a reset:** get their immediate first check (RF-5).
 
 ## Open questions
 - (none)

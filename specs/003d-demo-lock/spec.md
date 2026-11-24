@@ -1,6 +1,6 @@
 # 003d - Demo mode: project start command and single-process lock
 
-Status: draft (revised 2026-11-24 after `/sdd-clarify` pass 4; now also owns the project start command)
+Status: draft (revised 2026-11-24 after `/sdd-clarify` pass 5; owns the project start command)
 
 ## Context and goal
 Demo mode keeps state that only works in one process: the reset schedule and its catch-up (003c), and the in-memory rate limits and per-client attribution (003b). Two processes running demo mode against the same database would reset twice, split the limits and duplicate checks.
@@ -49,44 +49,46 @@ Read once at startup, validated only while demo mode is on (003a RF-2). Integers
 ### The project start command
 - RF-1: THE SYSTEM SHALL provide a project start command that, in every mode:
   - reads all settings with the application's own settings rules, including the `.env` file;
-  - runs the database migrations;
-  - then runs the server in the same process, as a single worker, without auto-reload, on host `0.0.0.0` and the port from `PORT` (default 8000).
+  - runs the database migrations in a separate child process, so their logging setup and module state never leak into the server, passing it the same `DATABASE_URL` the settings resolved;
+  - then runs the server in its own process, without auto-reload, on host `0.0.0.0` and the port from `PORT` (default 8000).
 
-  While demo mode is off, the server options are the ones the container uses today. 003b adds its server options for demo mode. The container image starts this command directly as its main process, so it receives stop signals itself (RNF-5).
-- RF-2: WHILE demo mode is on, IF the application was not started by the project start command (for example, a platform overrides the start command, or the server is run with auto-reload or several workers), THEN THE SYSTEM SHALL refuse to start with `Demo mode must be started with the project start command (python -m app.serve)`. The application recognizes the command by a marker the command sets in its own process before starting the server. Processes spawned by auto-reload or extra workers don't have it.
+  While demo mode is on, the server runs as a single worker. While demo mode is off, the worker count and the other server options are as the container uses today (`WEB_CONCURRENCY` honored). 003b adds its server options for demo mode. The container image starts this command directly as its main process, so it receives stop signals itself (RNF-5).
+- RF-2: WHILE demo mode is on, IF the application was not started by the project start command (for example, a platform overrides the start command, or the server is run with auto-reload or several workers), THEN THE SYSTEM SHALL refuse to start with `Demo mode must be started with the project start command (python -m app.serve)`. The application recognizes the command by a marker the command sets in memory, in a module of the application (not the start command's own module, and not an environment variable), in the same process just before starting the server. The application checks it at startup, before seeding (003c RF-2). Processes spawned by auto-reload or extra workers don't share that memory, so they don't have it.
 - RF-3: WHILE demo mode is on, THE SYSTEM SHALL read `WEB_CONCURRENCY` in the start command before anything else. Unset or empty means 1.
   - IF it is not decimal digits for a number of at least 1, THEN THE SYSTEM SHALL refuse with an error naming it.
   - IF it is greater than 1, THEN THE SYSTEM SHALL refuse with `Demo mode requires a single process (WEB_CONCURRENCY=<n>)`.
 - RF-4: WHILE demo mode is on, THE SYSTEM SHALL do the following in the start command, in this order, before starting the server:
-  1. validate all demo settings (003a, 003b, 003c and this spec), reporting every invalid one at once;
-  2. check `WEB_CONCURRENCY` (RF-3);
+  1. check `WEB_CONCURRENCY` (RF-3);
+  2. validate all demo settings (003a, 003b, 003c and this spec), reporting every invalid one at once;
   3. refuse with `Demo mode requires PostgreSQL` if the database is not PostgreSQL;
   4. take the demo lock (RF-5);
-  5. run the migrations;
-  6. start the server.
+  5. start the heartbeat (RF-7);
+  6. run the migrations (child process);
+  7. remove the start command's own stop-signal handling, so the server handles stop signals from now on, then start the server.
 
-  A failure at any step ends the process with a non-zero status and a clear error.
+  A failure at any step ends the process with a non-zero status and a clear error. A stop signal during step 6 ends the migration child and the process within about one second; PostgreSQL rolls back a revision that hadn't finished. A stop signal after step 7 is handled by the server, which acts on it only once application startup has finished (at most the startup bound of 003c RF-3). Docker's stop grace period may then kill the process, which releases the lock like a crash (RF-6).
 
 ### Taking and holding the lock
-- RF-5: WHILE demo mode is on, THE SYSTEM SHALL open the lock connection with the connect timeout and try to take the demo lock, identified by the lock name and the database. Behavior while trying:
-  - IF the lock is held by another process, or the database can't be reached, THEN THE SYSTEM SHALL try again every second until the lock wait timeout ends (one attempt when it is 0).
-  - IF it gets a stop signal (SIGTERM or SIGINT) while waiting, THEN THE SYSTEM SHALL exit within one second without taking the lock or running migrations.
+- RF-5: WHILE demo mode is on, THE SYSTEM SHALL open the lock connection and try to take the demo lock, identified by a 64-bit key derived from the lock name and the database name. While waiting, each connect attempt has a one-second connect timeout, so a stop signal is honored within about one second. The lock connection uses `DATABASE_URL` from the settings, keeps its query parameters, and its own lock options take precedence. Behavior while trying:
+  - IF the lock is held by another process, or the database can't be reached (connection refused or timed out), THEN THE SYSTEM SHALL try again every second until the lock wait timeout ends (one attempt when it is 0).
+  - IF the database rejects the connection for a permanent reason (wrong credentials, missing database, unsupported server), THEN THE SYSTEM SHALL refuse at once with `Demo mode could not connect to the database: <reason>`, without retrying and without the password in the message.
+  - IF it gets a stop signal (SIGTERM or SIGINT) while waiting, THEN THE SYSTEM SHALL exit with status 0 within about one second, without taking the lock or running migrations.
   - IF the timeout ends first, THEN THE SYSTEM SHALL refuse with `Demo mode requires a single process: another process holds the demo lock`, or `Demo mode could not reach the database to take the demo lock` when the database was never reached.
 - RF-6: THE SYSTEM SHALL hold the lock only through the lock connection, so the database releases it when that connection ends:
   - **Clean stop or crash:** released as soon as the connection closes.
-  - **Lost network:** the lock connection asks the database to probe it, so the database notices a dead client within about the dead-connection detection time and releases the lock. Over a local Unix socket a network loss can't happen, and a process death closes the socket.
-- RF-7: WHILE demo mode is on and the lock is held, THE SYSTEM SHALL run a heartbeat every heartbeat interval, with the heartbeat timeout. IF one heartbeat fails (an error, a timeout, or the lock no longer held), THEN THE SYSTEM SHALL at once:
+  - **Lost network:** for the lock connection's session, the database is told to probe the client: first probe after a third of the dead-connection detection time K, then a probe every ninth of K (at least 1 s), with 3 probes. So the database notices a dead client and releases the lock in under K. Over a local Unix socket a network loss can't happen, and a process death closes the socket.
+- RF-7: WHILE demo mode is on, from the moment the lock is held, THE SYSTEM SHALL run a heartbeat every heartbeat interval. Each heartbeat queries the database's lock table to confirm that this connection still holds the demo lock's key. A watchdog abandons the heartbeat once the heartbeat timeout has passed, whether or not the database call has returned. IF one heartbeat fails (an error, the watchdog timeout, or the lock no longer held), THEN THE SYSTEM SHALL at once:
   - stop the demo jobs;
   - log the reason;
-  - end the server process with a non-zero exit status within the heartbeat timeout plus 2 seconds, so the platform restarts it. The restarted process then follows RF-4.
+  - end the process immediately with exit status 1, without a graceful server shutdown (requests in progress are dropped). This happens within the heartbeat timeout plus 2 seconds of the failed heartbeat's start, so the platform restarts it. The restarted process then follows RF-4. A failure during the migrations also ends the migration child.
 
   A reset that is running is rolled back by the database when the connection ends. This is the one interruption 003c RF-8 allows.
-- RF-8: WHILE demo mode is off, THE SYSTEM SHALL not take the lock, read `WEB_CONCURRENCY`, require PostgreSQL or check the start marker. The start command still runs the migrations and the server as described in RF-1.
+- RF-8: WHILE demo mode is off, THE SYSTEM SHALL not take the lock, apply RF-3, require PostgreSQL or check the start marker. The start command still runs the migrations and the server as described in RF-1.
 
 ### Container and documentation
 - RF-9: THE SYSTEM SHALL change the container so that:
   - it starts the project start command directly as its main process, not through a shell, so stop signals reach it;
-  - its healthcheck start period is at least the worst-case startup with default settings: the lock wait timeout + the migrations + 003a's seed validation + 003c's maximum reset time, which is 120 seconds with the defaults.
+  - its healthcheck start period is at least the worst-case startup with default settings. That is the lock wait (60 s) + a migration allowance (30 s) + 003a's seed validation (one resolution timeout, 2 s) + 003c's write drain (5 s) + 003c's reset bound (under 60 s), which is about 157 s. The start period is set to 180 seconds. It's a fixed value, documented, and must be raised by hand if those settings are raised.
 - RF-10: THE SYSTEM SHALL document:
   - the project start command, which replaces the run commands in the README and AGENTS.md, with a development variant using auto-reload for demo mode off only;
   - the single-process design decision and its reason;
@@ -100,7 +102,7 @@ Read once at startup, validated only while demo mode is on (003a RF-2). Integers
   The detailed reference goes in the architecture document. The README "Running a public demo" section summarizes it.
 
 ## Non-functional requirements
-- RNF-1: With demo mode off, behavior does not change, except that the container runs migrations and the server through the project start command. Same migrations, same server, same host and port. All existing tests pass with unchanged outcomes, and the API schema document is identical.
+- RNF-1: With demo mode off, behavior does not change, except that the container runs migrations and the server through the project start command. Same migrations, same server, same host, port and worker count (`WEB_CONCURRENCY`). All existing tests pass with unchanged outcomes, and the API schema document is identical.
 - RNF-2: The lock needs no stored schema. It uses the database's own lock facility, so there is no migration.
 - RNF-3: The lock connection doesn't come from the pool used by requests and checks, so their capacity is unchanged.
 - RNF-4: Lock behavior is verified on PostgreSQL by `postgres`-marked tests:
@@ -108,7 +110,12 @@ Read once at startup, validated only while demo mode is on (003a RF-2). Integers
   - release on clean stop and on a killed process;
   - a stop signal during the wait;
   - heartbeat failure leading to exit, simulated by ending the lock connection from the database side;
-  - the dead-connection probing applied to the lock connection.
+  - the dead-connection probing applied to the lock connection's session;
+  - a permanent connection error refused at once;
+  - a stop signal during the migrations;
+  - the hard exit with status 1;
+  - the watchdog ending a heartbeat that hangs;
+  - application logging still at INFO after the migrations.
 
   The default SQLite suite tests RF-2 to RF-4 and the start command with a stand-in for the lock.
 - RNF-5: The container changes (RF-9) and the change of start command need owner approval in the plan (AGENTS.md: Docker config is ask-first). The owner approved the direction on 2026-11-24.
@@ -161,6 +168,22 @@ Earlier decisions I1 to I8 still apply unless refined here. Items marked "owner"
 - **M10 (3.4) – tests:** the database-side probing and the exit after the lock connection is ended are verified on PostgreSQL.
 - **M11 (4.1) – fixed numbers:** the one-second retry cadence and shutdown response, and the 2-second exit margin, are protocol constants. The heartbeat timeout is a setting.
 - **M12 (4.3) – principle 6:** exiting on lock loss is a deliberate safety design. A failing check still never stops the API. Only losing the single-process guarantee does.
+
+- **R1 (1.1) – hard exit:** the process ends immediately with status 1, with no graceful drain, after stopping the demo jobs (RF-7). uvicorn's normal stop waits for connections and exits 0, so it couldn't meet the bound.
+- **R2 (1.2) – watchdog:** the heartbeat is abandoned by a watchdog at its timeout, because a blocking database call on a dead network ignores statement timeouts.
+- **R3 (1.3) – keepalive:** K defines database-side probing (idle K/3, interval K/9, 3 probes), so detection is under K and actually releases the lock on the server.
+- **R4 (1.4) – marker:** an in-memory flag in an application module, set in the same process. It isn't an environment variable (children would inherit it) and isn't in the start command's own module (`python -m` makes a separate module object).
+- **R5 (1.5, 3.2) – heartbeat and signals around migrations:** the heartbeat starts once the lock is held. Migrations run in a child process that a stop signal or heartbeat failure ends. After the server starts, stop signals are the server's, with the startup bound documented.
+- **R6 (1.6) – exit statuses:** a stop during the wait exits 0; lock loss exits 1. The start command's signal handling is removed before the server starts.
+- **R7 (2.1) – healthcheck:** the sum is made explicit (about 157 s), so the start period is 180 s.
+- **R8 (2.2) – one-second stop:** connect attempts during the wait use a one-second connect timeout.
+- **R9 (2.3) – order:** `WEB_CONCURRENCY` is checked first, as RF-3 says.
+- **R10 (2.4) – workers with demo mode off:** `WEB_CONCURRENCY` is honored as today, so RNF-1 holds.
+- **R11 (3.1) – logging:** migrations run in a child process, so Alembic's logging setup never silences the server's INFO logs.
+- **R12 (3.3) – permanent connection errors:** refused at once with the reason, and the password never shown.
+- **R13 (3.4) – lock check and key:** the heartbeat confirms the key in the database's lock table. The key is a 64-bit value derived from the lock name and the database name.
+- **R14 (3.6) – connection settings:** the lock connection and the migration child use the same resolved `DATABASE_URL`. Its query parameters are kept, and the lock options take precedence.
+- **R15 (4.1) – fixed start period:** documented as fixed, to be raised by hand with the settings.
 
 ## Open questions
 - (none)

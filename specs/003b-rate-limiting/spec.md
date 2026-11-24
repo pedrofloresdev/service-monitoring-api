@@ -1,6 +1,6 @@
 # 003b - Demo mode: rate limiting and client identification
 
-Status: draft (revised 2026-11-24 after `/sdd-clarify` pass 4)
+Status: draft (revised 2026-11-24 after `/sdd-clarify` pass 5)
 
 ## Context and goal
 Specs 003a, 003d and 003c make the API deployable as a public demo: seeded services, protection, a global cap and a per-host cap, a single enforced process, and a periodic reset. They don't limit what one client can do:
@@ -51,7 +51,7 @@ Read once at startup and validated only while demo mode is on (003a RF-2). Integ
 
 ### Settings and server options
 - RF-1: WHILE demo mode is on, IF any 003b setting is unparsable or outside its valid values, or the per-client cap is greater than 003a's global visitor-service cap, THEN THE SYSTEM SHALL refuse to start with an error naming the environment variable (both variables for the cap rule). 003d's start command reports this together with the other settings errors.
-- RF-2: WHILE demo mode is on, THE SYSTEM SHALL have 003d's project start command run the server with forwarding-header handling off, so the connection address is never rewritten, and with access logging off, so client addresses are not written to the server log. While demo mode is off, the server options stay as today.
+- RF-2: WHILE demo mode is on, THE SYSTEM SHALL have 003d's project start command run the server, through the single place where 003d collects demo-mode server options (testable by checking the options passed to the server), with forwarding-header handling off, so the connection address is never rewritten, and with access logging off, so client addresses are not written to the server log. While demo mode is off, the server options stay as today.
 - RF-3: THE SYSTEM SHALL rely on 003d RF-2 (the start marker) to guarantee that demo mode never runs under another start method, where the server might rewrite client addresses. This spec adds no second check.
 
 ### Rate limits
@@ -78,7 +78,7 @@ Read once at startup and validated only while demo mode is on (003a RF-2). Integ
 
     A port must be decimal 1 to 65,535 without leading zeros, and is removed. An empty port (`1.2.3.4:`) is invalid.
   - **Rejected entry forms:** zone IDs and anything else.
-  - **Fallback:** IF the header is missing, has fewer than N entries after dropping empty ones, or the selected entry is invalid, THEN use the connection address.
+  - **Fallback:** IF the header is missing, has fewer than N entries after dropping empty ones, or the selected entry is invalid, THEN use the connection address. An invalid selected entry is logged as a warning at most once a minute, without any address, so a misbehaving proxy is noticed.
 
   The address then becomes a client as in Definitions.
 
@@ -86,12 +86,12 @@ Read once at startup and validated only while demo mode is on (003a RF-2). Integ
 - RF-9: WHILE demo mode is on, IF a create request comes from a client whose number of attributed visitor services is already at or above the per-client cap, THEN THE SYSTEM SHALL reject it with HTTP 409 and `{"detail": "Demo limit reached: at most <C> visitor services per client."}`.
   - The order is in 003a RF-16: global cap, then per-client cap, then per-host cap.
   - The per-client cap is checked before the spec 002 hostname check, then re-checked in 003a's atomic store step (003a RF-15), together with the global and per-host caps.
-  - That one step covers the re-checks, storing the service, the commit, and recording the attribution, with no network lookup inside. It is serialized process-wide (one create at a time inside the step), so the database and the attribution never disagree and concurrent requests can't exceed any cap.
+  - That one step covers the re-checks (in the same order as the first checks), storing the service, the commit, and recording the attribution, with no network lookup inside. It is serialized by the database (003a RF-15) and, for the in-memory attribution, within the process. It covers creates and updates that change a cap host alike. So the database and the attribution don't disagree, and concurrent requests can't exceed any cap.
   - The rate limiter uses its own, separate synchronization and never waits for this step (RNF-2).
-  - The one exception is after a restart (RF-11).
+  - Attribution can fall behind the database only after a restart (RF-11), or after the owner changes trusted proxy hops or the IPv6 prefix (Edge cases).
 - RF-10: THE SYSTEM SHALL change attribution only as follows:
   - record it in the atomic step of a committed create (RF-9);
-  - remove it when a delete commits;
+  - remove it inside the delete's commit step, serialized like the create step, so a create never sees a stale count;
   - clear it all when 003c reports a committed reset (003c RF-5).
 
   A request or reset that fails changes no attribution, and updates never change it.
@@ -99,7 +99,8 @@ Read once at startup and validated only while demo mode is on (003a RF-2). Integ
 ### State and privacy
 - RF-11: THE SYSTEM SHALL keep rate-limit counters and attribution in memory only:
   - For each client and limit, at most L timestamps (that limit's count) are kept. Memory therefore holds at most the maximum tracked clients × (general limit + write limit) timestamps, plus attribution.
-  - Counters for a client are dropped once its windows hold no requests. This is checked when the client is next seen, and by a light sweep every general window, so an idle process shrinks too.
+  - Counters for a client are dropped once its windows hold no requests. This is checked when the client is next seen, and by a light background sweep every general window, so an idle process shrinks too. A sweep failure is logged and doesn't affect requests.
+  - With the maximum settings the bound is about 2×10^8 timestamps, several gigabytes. The documentation states this worst case. The defaults stay small (RNF-5).
   - IF a new client would exceed the maximum tracked clients, THEN the counters of the client tracked longest without a request are dropped first. An active client is dropped only if more than the maximum of distinct clients arrive after its last request.
   - Attribution is never dropped by this rule. 003a's global cap bounds it.
   - Everything is lost on restart. Visitor services that survive a restart then count only toward the global and per-host caps until they are deleted or reset, so a client may hold more than the per-client cap until the next reset. Accepted.
@@ -119,13 +120,13 @@ Read once at startup and validated only while demo mode is on (003a RF-2). Integ
   The detailed reference goes in the architecture document. The product SPEC and the README "Running a public demo" section (created by 003a) summarize it and link there.
 
 ## Non-functional requirements
-- RNF-1: With demo mode off, behavior does not change. All existing tests pass with unchanged outcomes, and the API schema document is identical.
+- RNF-1: With demo mode off, this spec changes nothing. All existing tests pass with unchanged outcomes, apart from changes made by 003a (RF-14, RF-19), and the API schema document is identical.
 - RNF-2: Rate limiting never makes a request wait: each counted request is accepted or rejected immediately. A wait that 003c imposes on an accepted write is not part of rate limiting.
 - RNF-3: Counters, attribution and the per-client cap are safe under concurrent requests.
 - RNF-4: The window logic, the `X-Forwarded-For` parsing and the client grouping are pure functions with tests written first (constitution principle 4). Time-based behavior is tested with an injectable monotonic clock, never by waiting.
 - RNF-5: **Benchmarks** (measured and recorded in the validation notes; not CI gates):
   - the added time per request for the limit check is under 1 ms at the 95th percentile;
-  - with 10,000 distinct clients at default limits, memory stays within the stated bound, and tracked counters shrink to empty once the windows pass.
+  - with 10,000 distinct clients at default limits, the process's memory grows by less than 50 MB, and tracked counters shrink to empty once the windows pass.
 - RNF-6: The server options are passed through 003d's start command. The container change itself belongs to 003d and its approval.
 - RNF-7: The spec 000 to 003c and 003d quality gates stay green.
 - RNF-8: Automated tests cover, at minimum:
@@ -145,10 +146,10 @@ Read once at startup and validated only while demo mode is on (003a RF-2). Integ
   - attribution changing only on committed creates, deletes and resets;
   - counter eviction at the maximum without dropping attribution, and the sweep shrinking an idle process;
   - RF-13 fail-open;
-  - demo mode off changing nothing except RNF-1's exception.
+  - demo mode off changing nothing.
 
 ## Edge cases
-- Opening the interactive docs makes about 2 counted requests (the page and the API schema document). With the default of 60 per minute, normal browsing stays far below the limit.
+- Opening the interactive docs makes about 3 counted requests (the page, the API schema document and the browser's `/favicon.ico`). With the default of 60 per minute, normal browsing stays far below the limit.
 - Behind a proxy with trusted proxy hops left at 0: every visitor shares the proxy's address and one budget. The docs explain how to set the hop count.
 - With hops = N > 0, a client that reaches the app directly can forge `X-Forwarded-For`. The docs say the hop count must match the real proxy chain and the app must be reachable only through it.
 - A proxy that replaces `X-Forwarded-For` instead of appending, with N set too high: the header has fewer than N entries, so every visitor falls back to the proxy's address. This is a misconfiguration, and the docs cover it.
@@ -176,7 +177,7 @@ Read once at startup and validated only while demo mode is on (003a RF-2). Integ
 - With demo mode on, a client over either limit gets 429 with the correct `Retry-After` and message, and gets through once the window allows, in automated tests (injectable clock) and in a manual run against the running stack.
 - Client identification behaves as RF-8 with 0 and N hops, including a forged header and every parsing case in RNF-8.
 - The per-client cap returns its 409 in the 003a RF-16 order and is released on delete and after a committed reset.
-- With demo mode on, the server runs with forwarding headers and the access log off (through 003d's start command).
+- With demo mode on, the server runs with forwarding-header handling disabled and access logging disabled (through 003d's start command).
 - With demo mode off, all existing tests pass unchanged and the API schema document is identical.
 - The RNF-5 benchmarks are measured and recorded. The docs are updated per RF-15. The quality gates are green in CI.
 
@@ -214,6 +215,20 @@ Earlier decisions (D1 to D12, G1 to G15) still apply unless refined here. All of
   - tests inject client addresses;
   - error logs exclude client addresses.
 - **P8 (3.2) – eviction:** added to the docs list.
+
+- **U1 (1.1) – host-changing updates:** also go through the atomic step. The database serializes it (003a RF-15), and the process serializes the in-memory attribution.
+- **U2 (1.2) – deletes:** attribution is removed inside the delete's commit step, so there's no window with a stale count.
+- **U3 (1.3) – re-check order:** the same order as the first checks.
+- **U4 (1.4) – server options seam:** one place in 003d's start command collects them, so tests can assert what the server receives.
+- **U5 (1.5) – sweep:** a light background task. Its failures are logged and don't touch requests.
+- **U6 (1.6, 3.1) – memory:** the benchmark criterion is under 50 MB growth for 10,000 clients at defaults, and the maximum-settings worst case is documented.
+- **U7 (1.7, 2.1, 2.2, 2.3) – fixes:**
+  - the docs-browsing count, including the favicon;
+  - unambiguous completion wording;
+  - RNF-1 and the RNF-8 reference corrected;
+  - the attribution exceptions listed in full.
+- **U8 (3.2) – invalid proxy entries:** logged as a warning at most once a minute, without addresses.
+- **U9 (3.3) – reset notification:** synchronous, before 003c opens the gate (003c RF-5).
 
 ## Open questions
 - (none)
