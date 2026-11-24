@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.db.models.services import Service
 from app.db.session import get_db
 from app.schemas.services import ServiceCreate, ServiceResponse, ServiceUpdate
-from app.services.url_safety import ensure_registration_allowed
+from app.services import service_writes
 from app.workers.scheduler import schedule_service, unschedule_service
 
 NAME = "services"
@@ -14,23 +14,12 @@ router = APIRouter(prefix=PREFIX, tags=[NAME])
 
 @router.post("", response_model=ServiceResponse, status_code=status.HTTP_201_CREATED)
 def create_service(payload: ServiceCreate, db: Session = Depends(get_db)) -> Service:
-    # Before the duplicate check: an unsafe URL is a 422 even if it already exists (spec 002).
-    ensure_registration_allowed(payload.url.host, payload.submitted_url)
-    normalized_url = str(payload.url)
-    existing = db.query(Service).filter(Service.url == normalized_url).first()
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="A service with this URL already exists"
-        )
-
-    data = payload.model_dump()
-    data["url"] = normalized_url
-    new_service = Service(**data)
-    db.add(new_service)
-    db.commit()
-    db.refresh(new_service)
-    schedule_service(new_service)
-    return new_service
+    try:
+        service = service_writes.create_service(db, payload)
+    except service_writes.DuplicateUrl:
+        raise _duplicate() from None
+    schedule_service(service)
+    return service
 
 
 @router.get("", response_model=list[ServiceResponse])
@@ -43,47 +32,44 @@ def list_services(active_only: bool = False, db: Session = Depends(get_db)) -> l
 
 @router.get("/{service_id}", response_model=ServiceResponse)
 def get_service(service_id: int, db: Session = Depends(get_db)) -> Service:
-    service = db.query(Service).filter(Service.id == service_id).first()
-    if not service:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
-    return service
+    try:
+        return service_writes.get_service_or_404(db, service_id)
+    except service_writes.ServiceNotFound:
+        raise _not_found() from None
 
 
 @router.patch("/{service_id}", response_model=ServiceResponse)
 def update_service(
     service_id: int, payload: ServiceUpdate, db: Session = Depends(get_db)
 ) -> Service:
-    service = db.query(Service).filter(Service.id == service_id).first()
-    if not service:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
-
-    updates = payload.model_dump(exclude_unset=True)
-    if "url" in updates:
-        # Validated even when equal to the stored URL; nothing is written before (spec 002).
-        if payload.url is not None:
-            ensure_registration_allowed(payload.url.host, payload.submitted_url)
-        updates["url"] = str(updates["url"])
-
-    for field, value in updates.items():
-        setattr(service, field, value)
-
-    db.commit()
-    db.refresh(service)
-
+    try:
+        service = service_writes.update_service(db, service_id, payload)
+    except service_writes.ServiceNotFound:
+        raise _not_found() from None
+    except service_writes.DuplicateUrl:
+        raise _duplicate() from None
+    # Only after a successful commit (spec 003a RF-16).
     if service.is_active:
         schedule_service(service)
     else:
         unschedule_service(service.id)
-
     return service
 
 
 @router.delete("/{service_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_service(service_id: int, db: Session = Depends(get_db)) -> None:
-    service = db.query(Service).filter(Service.id == service_id).first()
-    if not service:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
+    try:
+        service_writes.delete_service(db, service_id)
+    except service_writes.ServiceNotFound:
+        raise _not_found() from None
+    unschedule_service(service_id)  # after the commit, so a failed delete keeps its schedule
 
-    unschedule_service(service.id)
-    db.delete(service)
-    db.commit()
+
+def _not_found() -> HTTPException:
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
+
+
+def _duplicate() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT, detail="A service with this URL already exists"
+    )

@@ -56,7 +56,7 @@ Rules for every task:
     - The OpenAPI JSON snapshot is byte-identical to the one from `master`.
     - All quality checks are green.
 
-- [ ] **T6. Write flows module with demo mode off: duplicates and commit order.** Create `app/services/service_writes.py` with the create, update and delete flows (plan §7.2–§7.4, demo branches not yet active) and two-layer duplicate detection (D5, D6). Make the routes thin. Schedule and unschedule only after a successful commit. RF-14, RF-16, RF-18
+- [x] **T6. Write flows module with demo mode off: duplicates and commit order.** Create `app/services/service_writes.py` with the create, update and delete flows (plan §7.2–§7.4, demo branches not yet active) and two-layer duplicate detection (D5, D6). Make the routes thin. Schedule and unschedule only after a successful commit. RF-14, RF-16, RF-18
   - Done when:
     - The tests written first (in `tests/test_service_writes.py`, demo mode off) show 409 for exact and legacy (`http://Example.com`) duplicates on create and update.
     - Keeping a service's own URL is accepted.
