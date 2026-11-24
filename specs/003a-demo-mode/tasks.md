@@ -21,7 +21,7 @@ Rules for every task:
     - They cover each cap at and above its boundary.
     - All quality checks are green.
 
-- [ ] **T2. Seed-list parser and seed planner, test first.** Write the tests first, then add `parse_seed_list` and `plan_seeding` (plan §6) to `app/services/demo_rules.py`. RF-3, RF-4, RF-5, RF-6
+- [x] **T2. Seed-list parser and seed planner, test first.** Write the tests first, then add `parse_seed_list` and `plan_seeding` (plan §6) to `app/services/demo_rules.py`. RF-3, RF-4, RF-5, RF-6
   - Done when:
     - The tests failed first and pass after.
     - The parser tests cover whole-list errors (invalid JSON, a non-array, an empty list, more than 20 entries), unknown keys, wrong types (`true`, `"200"`, `1.0`), user information, a URL the API rejects, and a duplicate normalized URL.
