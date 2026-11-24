@@ -12,8 +12,6 @@ from dataclasses import dataclass, field
 
 from pydantic import HttpUrl, TypeAdapter, ValidationError
 
-from app.schemas.services import ServiceCreate
-
 _TRUE = frozenset({"true", "1", "yes", "on"})
 _FALSE = frozenset({"false", "0", "no", "off"})
 _DIGITS = re.compile(r"[0-9]+")
@@ -119,6 +117,8 @@ def _entry_problems(entry: object) -> list[str]:
             problems.append(f"{key} must be a JSON integer")
     if problems:
         return problems
+    from app.schemas.services import ServiceCreate  # lazy: config imports this module
+
     parsed = parse_url(entry["url"])
     if parsed is not None and (parsed.username or parsed.password):
         return ["url must not contain user information"]
@@ -147,6 +147,8 @@ def parse_seed_list(raw: str | None) -> tuple[list[SeedDefinition], list[str]]:
         return whole("it is empty (1 to 20 definitions are required)")
     if len(data) > MAX_SEEDS:
         return whole(f"more than {MAX_SEEDS} definitions ({len(data)})")
+
+    from app.schemas.services import ServiceCreate  # lazy: config imports this module
 
     seeds: list[SeedDefinition] = []
     errors: list[str] = []

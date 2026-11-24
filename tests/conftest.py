@@ -221,3 +221,28 @@ def make_metric(
     db_session.commit()
     db_session.refresh(metric)
     return metric
+
+
+# ---------------------------------------------------------------------------
+# Demo mode (spec 003a): switch it on for one test
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def demo_config() -> Iterator[Any]:
+    """Demo mode on for one test, with small caps; restored afterwards."""
+    from app.core import demo_settings
+    from app.services.demo_rules import SeedDefinition
+
+    config = demo_settings.DemoConfig(
+        seeds=(SeedDefinition("Seed", "https://seed.example/", 200, 60),),
+        global_cap=4,
+        per_host_cap=2,
+        min_interval=300,
+    )
+    previous = demo_settings.demo_config
+    demo_settings.demo_config = config
+    try:
+        yield config
+    finally:
+        demo_settings.demo_config = previous

@@ -29,7 +29,7 @@ Rules for every task:
     - The planner tests cover: create; adopt a visitor service and an ordinary service; reactivate; several matches choosing the lowest id with warnings; an unparsable stored URL ignored with a warning; demotion of a removed seed.
     - All quality checks are green.
 
-- [ ] **T3. Settings wiring.** Make these changes:
+- [x] **T3. Settings wiring.** Make these changes:
   - `app/core/config.py`: `DEMO_MODE` parsed strictly at import.
   - New `app/core/demo_settings.py`: `DemoSettings` with raw string fields, `load_demo_config()` collecting every error, and the module-level `demo_config`.
   - `tests/conftest.py`: a `demo_config` fixture.
