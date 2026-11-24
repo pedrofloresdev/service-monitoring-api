@@ -50,7 +50,7 @@ Rules for every task:
     - `pytest -m postgres --no-cov` and all quality checks are green.
     - Existing migrations are unchanged (`git diff` shows one added revision).
 
-- [ ] **T5. `null` on required fields returns 422.** Add the `mode="before"` validator on `ServiceUpdate` for `name`, `url`, `expected_status`, `check_interval` and `is_active` (plan §1, §5). RF-19
+- [x] **T5. `null` on required fields returns 422.** Add the `mode="before"` validator on `ServiceUpdate` for `name`, `url`, `expected_status`, `check_interval` and `is_active` (plan §1, §5). RF-19
   - Done when:
     - The tests written first (in `tests/test_service_writes.py`) show one `null_not_allowed` entry per null field, with message `<field> cannot be null`, for every field and for a combination, with demo mode on and off.
     - The OpenAPI JSON snapshot is byte-identical to the one from `master`.

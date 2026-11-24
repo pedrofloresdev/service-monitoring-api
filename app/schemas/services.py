@@ -7,6 +7,7 @@ from pydantic import (
     HttpUrl,
     ModelWrapValidatorHandler,
     PrivateAttr,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -69,6 +70,14 @@ class ServiceUpdate(_ServiceUrlInput):
     expected_status: Optional[int] = Field(default=None, ge=100, le=599)
     check_interval: Optional[int] = Field(default=None, ge=10, le=86400)
     is_active: Optional[bool] = None
+
+    @field_validator("name", "url", "expected_status", "check_interval", "is_active", mode="before")
+    @classmethod
+    def _reject_null(cls, value: Any, info: ValidationInfo) -> Any:
+        """Spec 003a RF-19: an explicit null on a required field is a 422, not a 500."""
+        if value is None:
+            raise PydanticCustomError("null_not_allowed", f"{info.field_name} cannot be null")
+        return value
 
 
 class ServiceResponse(BaseModel):
