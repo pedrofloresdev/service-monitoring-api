@@ -12,7 +12,7 @@ Rules for every task:
 
 ## Tasks
 
-- [ ] **T1. Pure parsing and cap rules, test first.** Write `tests/test_demo_rules.py` first, then add to `app/services/demo_rules.py`: `parse_demo_flag`, `parse_strict_int`, `normalized_url`, `cap_host`, `global_cap_reached` and `per_host_cap_reached` (plan §6). RF-1, RF-3, RF-15
+- [x] **T1. Pure parsing and cap rules, test first.** Write `tests/test_demo_rules.py` first, then add to `app/services/demo_rules.py`: `parse_demo_flag`, `parse_strict_int`, `normalized_url`, `cap_host`, `global_cap_reached` and `per_host_cap_reached` (plan §6). RF-1, RF-3, RF-15
   - Done when:
     - The new tests failed before the functions existed and pass after.
     - They cover every accepted `DEMO_MODE` spelling plus invalid, empty and unset values.
