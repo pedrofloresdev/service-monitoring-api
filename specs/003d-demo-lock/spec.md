@@ -1,6 +1,6 @@
 # 003d - Demo mode: project start command and single-process lock
 
-Status: draft (revised 2026-11-24 after `/sdd-clarify` pass 5; owns the project start command)
+Status: approved (2026-11-24, after five `/sdd-clarify` passes and a confirmation pass)
 
 ## Context and goal
 Demo mode keeps state that only works in one process: the reset schedule and its catch-up (003c), and the in-memory rate limits and per-client attribution (003b). Two processes running demo mode against the same database would reset twice, split the limits and duplicate checks.

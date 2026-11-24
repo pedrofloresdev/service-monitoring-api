@@ -1,6 +1,6 @@
 # 003b - Demo mode: rate limiting and client identification
 
-Status: draft (revised 2026-11-24 after `/sdd-clarify` pass 5)
+Status: approved (2026-11-24, after five `/sdd-clarify` passes and a confirmation pass)
 
 ## Context and goal
 Specs 003a, 003d and 003c make the API deployable as a public demo: seeded services, protection, a global cap and a per-host cap, a single enforced process, and a periodic reset. They don't limit what one client can do:

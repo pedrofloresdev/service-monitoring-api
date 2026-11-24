@@ -1,6 +1,6 @@
 # 003c - Demo mode: periodic reset and notice
 
-Status: draft (revised 2026-11-24 after `/sdd-clarify` pass 5)
+Status: approved (2026-11-24, after five `/sdd-clarify` passes and a confirmation pass)
 
 ## Context and goal
 Spec 003a adds demo mode: seeded services, protection and caps on visitor services. Nothing returns the demo to a known state, so after a few days it shows whatever visitors left behind.

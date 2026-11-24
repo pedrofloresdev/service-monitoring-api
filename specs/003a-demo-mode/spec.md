@@ -1,6 +1,6 @@
 # 003a - Demo mode: seeding, protection and caps
 
-Status: draft (revised 2026-11-24 after `/sdd-clarify` pass 5)
+Status: approved (2026-11-24, after five `/sdd-clarify` passes and a confirmation pass)
 
 ## Context and goal
 The API is a portfolio piece, so it should be deployable as a public demo that anyone can try without setup. Deployed as it is today, a public instance is open to misuse:
