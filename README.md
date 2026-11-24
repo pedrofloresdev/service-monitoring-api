@@ -1,12 +1,14 @@
 # Service Monitoring API
 
-A production-ready backend system that monitors publicly reachable HTTP services, tracks uptime, and delivers real-time observability through automated health checks and performance metrics.
+A backend system that monitors publicly reachable HTTP services, tracks uptime, and delivers real-time observability through automated health checks and performance metrics.
 
 ---
 
 ## Overview
 
-**Service Monitoring API** simulates a real-world observability platform. Register any HTTP endpoint and the system will continuously probe it on its own schedule, record response times, detect failures intelligently, and expose aggregated health data through a clean REST API.
+**Service Monitoring API** simulates a real-world observability platform. Register any publicly reachable HTTP endpoint and the system will continuously probe it on its own schedule, record response times, detect failures intelligently, and expose aggregated health data through a clean REST API.
+
+> **Note:** there is no authentication yet (planned in the spec roadmap). Anyone who can reach the API can create, change and delete services, so don't expose it publicly as is.
 
 ---
 
@@ -16,7 +18,7 @@ A production-ready backend system that monitors publicly reachable HTTP services
 
 - Background scheduler (APScheduler) runs checks per service on its own configurable interval
 - Each check records HTTP status code and response time
-- `httpx` with configurable timeouts — no thread blocking
+- `httpx` with configurable timeouts; checks run in scheduler background threads, so a slow target never blocks request handling
 
 ### Intelligent Status Detection
 
@@ -32,21 +34,27 @@ A production-ready backend system that monitors publicly reachable HTTP services
 ### Metrics Collection & Aggregation
 
 - Stores response time (`Float` precision) and HTTP status per check
-- Time-range filtering (`?hours=24`) and cursor-style pagination on the metrics endpoint
+- Time-range filtering (`?hours=24`) and `limit`/`offset` pagination on the metrics endpoint (newest first)
 - Uptime percentage calculated over the last 24 hours
 
 ### Full CRUD for Services
 
 - Register, list, update (partial PATCH), and delete monitored services
 - Deactivating a service (`is_active: false`) removes it from the scheduler without deleting its history
-- Duplicate URL detection with 409 Conflict
+- Duplicate URL detection with 409 Conflict when a service is created
 
-### Production-ready Infrastructure
+### URL Safety (SSRF Protection)
+
+- Service URLs that point to non-public addresses (loopback, private networks, link-local and cloud metadata, reserved ranges, `localhost`) are rejected with 422
+- Every check validates the destination again (protects against DNS rebinding) and connects only to validated public addresses
+- Full rules in [docs/architecture.md](docs/architecture.md) §6
+
+### Infrastructure
 
 - Docker + Docker Compose with PostgreSQL health-check and proper `depends_on` condition
 - Alembic migrations run automatically on container startup
 - Docker `HEALTHCHECK` on the API container
-- Structured logging across all layers
+- Consistent logging (timestamp, level, logger name) across all layers
 
 ---
 
@@ -75,9 +83,11 @@ app/
 │   ├── session.py   # Engine + session factory
 │   └── models/      # SQLAlchemy ORM models
 ├── schemas/         # Pydantic request / response schemas
-├── services/        # Business logic (monitor, status aggregation)
+├── services/        # Business logic (monitor, status aggregation, URL safety)
 ├── workers/         # APScheduler lifecycle management
 └── main.py          # App factory + lifespan
+migrations/          # Alembic revisions
+tools/               # schema_check: migration history vs models
 ```
 
 For how a health check flows from the scheduler to a stored metric, and how UP/DOWN, average response time and uptime are derived, see [docs/architecture.md](docs/architecture.md).
@@ -98,6 +108,8 @@ All routes are prefixed with `/api/v1`.
 | `PATCH` | `/services/{id}` | Update service config or toggle active state |
 | `DELETE` | `/services/{id}` | Remove service and its metrics |
 
+A URL that points to a non-public address returns **422**. A URL already used by another service returns **409** on create.
+
 **POST /services body:**
 
 ```json
@@ -117,7 +129,7 @@ All routes are prefixed with `/api/v1`.
 |--------|------|-------------|
 | `GET` | `/metrics/services/{id}` | Paginated metrics for a service |
 
-**Query params:** `limit` (1–1000, default 100) · `offset` · `hours` (restrict to last N hours)
+**Query params:** `limit` (1–1000, default 100) · `offset` (≥ 0, default 0) · `hours` (1–8760, restrict to the last N hours). Results are ordered newest first.
 
 ---
 
@@ -125,7 +137,7 @@ All routes are prefixed with `/api/v1`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/status` | Aggregated health for all active services |
+| `GET` | `/status` | Aggregated health for all active services that have at least one check |
 
 **Response:**
 
@@ -163,7 +175,7 @@ All routes are prefixed with `/api/v1`.
 ### With Docker (recommended)
 
 ```bash
-git clone https://github.com/flobell/service-monitoring-api.git
+git clone https://github.com/pedrofloresdev/service-monitoring-api.git
 cd service-monitoring-api
 
 cp .env.example .env       # review and adjust if needed
@@ -218,7 +230,7 @@ pytest -m postgres --no-cov      # migration behavior and endpoints on the migra
 
 ### Continuous integration
 
-GitHub Actions (`.github/workflows/ci.yml`) runs five independent jobs on every pull request to `master` and on every push to `master`. Each job reports its own status: `lint`, `format`, `typecheck`, `test` and `migrations`. The `migrations` job runs the PostgreSQL checks against a disposable PostgreSQL 15 container. To block merges while a check fails, mark these five as required status checks in the repository's branch protection settings for `master`.
+GitHub Actions (`.github/workflows/ci.yml`) runs five independent jobs on every pull request to `master` and on every push to `master`. Each job reports its own status: `lint`, `format`, `typecheck`, `test` and `migrations`. The `migrations` job runs the PostgreSQL checks against a disposable PostgreSQL 15 container. All five are required status checks on `master` (branch protection ruleset), so a pull request can't be merged while any of them fails.
 
 ### How changes are made
 
@@ -263,7 +275,9 @@ With `docker compose`, the API container's `DATABASE_URL` is set in `docker-comp
 | ORM + migrations | SQLAlchemy 2 models, Alembic versioned migrations |
 | Time-series data | Indexed `checked_at`, time-range queries, uptime aggregation |
 | Resource management | Session lifecycle in background threads, scheduler shutdown on app teardown |
-| Docker best practices | Health checks, `depends_on` conditions, `.dockerignore`, startup scripts |
+| Docker best practices | Health checks, `depends_on` conditions, `.dockerignore`, migrations on container start |
+| Security | SSRF protection: non-public destinations rejected on registration and blocked before every check |
+| Quality and process | Strict typing, linting, coverage floor, CI with five required checks, Spec-Driven Development |
 | Configuration management | `pydantic-settings` for type-safe, validated env vars |
 
 ---
