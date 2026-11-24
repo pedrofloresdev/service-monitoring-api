@@ -7,6 +7,10 @@ from fastapi.responses import JSONResponse
 
 from app.api.v1 import PREFIX as V1_PREFIX
 from app.api.v1 import metrics, services, status
+from app.core import demo_settings
+from app.core.config import settings
+from app.core.demo_settings import load_demo_config
+from app.services.demo_seeding import seed_at_startup, validate_seed_urls
 from app.services.url_safety import UnsafeDestinationError
 from app.workers.scheduler import start_scheduler, stop_scheduler
 
@@ -18,7 +22,15 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    start_scheduler()
+    # Any exception here fails the lifespan startup, so the server refuses to start.
+    if settings.demo_mode:
+        config = load_demo_config()  # every invalid setting at once (spec 003a RF-3)
+        validate_seed_urls(config)  # RF-4
+        first_check_ids = seed_at_startup(config)  # one transaction (RF-5 to RF-7)
+        demo_settings.demo_config = config
+        start_scheduler(first_check_ids=first_check_ids)  # RF-8
+    else:
+        start_scheduler()
     yield
     stop_scheduler()
 

@@ -81,7 +81,7 @@ Rules for every task:
 
     All quality checks are green.
 
-- [ ] **T8. Seeding at startup with immediate first checks.** Make these changes:
+- [x] **T8. Seeding at startup with immediate first checks.** Make these changes:
   - Add `validate_seed_urls`, which resolves hostnames concurrently, and `apply_seed_plan` in `app/services/demo_seeding.py`.
   - In the lifespan, while demo mode is on: load the config, validate, seed in one transaction, then start the scheduler with first-check ids.
   - Add `start_scheduler(first_check_ids)` and `schedule_first_check` (one-off jobs, `misfire_grace_time=None`).
