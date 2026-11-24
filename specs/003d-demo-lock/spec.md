@@ -177,7 +177,7 @@ Earlier decisions I1 to I8 still apply unless refined here. Items marked "owner"
 - **R5 (1.5, 3.2) – heartbeat and signals around migrations:** the heartbeat starts once the lock is held. Migrations run in a child process that a stop signal or heartbeat failure ends. After the server starts, stop signals are the server's, with the startup bound documented.
 - **R6 (1.6) – exit statuses:** a stop during the wait exits 0; lock loss exits 1. The start command's signal handling is removed before the server starts.
 - **R7 (2.1) – healthcheck:** the sum is made explicit (about 157 s), so the start period is 180 s.
-- **R8 (2.2) – one-second stop:** connect attempts during the wait use a one-second connect timeout.
+- **R8 (2.2) – one-second stop:** superseded by R16. Connect attempts use a 2-second timeout, and a stop signal abandons an attempt in progress, so the stop is still honored within about one second.
 - **R9 (2.3) – order:** `WEB_CONCURRENCY` is checked first, as RF-3 says.
 - **R10 (2.4) – workers with demo mode off:** `WEB_CONCURRENCY` is honored as today, so RNF-1 holds.
 - **R11 (3.1) – logging:** migrations run in a child process, so Alembic's logging setup never silences the server's INFO logs.
