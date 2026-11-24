@@ -20,6 +20,7 @@ A small, reliable uptime monitor exposed as a REST API: register endpoints, chec
 - Quality baseline (spec 000): ruff lint/format, strict mypy, 71 pytest tests with an 88% coverage floor, GitHub Actions CI.
 - Migration history verified against the models on PostgreSQL in CI (spec 001).
 - URL safety (spec 002): service URLs pointing to non-public addresses (loopback, private, link-local/cloud metadata, reserved ranges, `localhost`) are rejected with 422 on create/update, and every check validates the destination again (DNS rebinding) and connects only to validated public addresses; blocked checks are stored as DOWN with a fixed reason. Details in `docs/architecture.md` §6.
+- Demo mode (spec 003a, off by default): seeded example services that visitors cannot change (real check history only, immediate first checks), visitor services with a global and per-host cap and a minimum check interval, 403/409/422 responses in a fixed order. With demo mode on or off, a duplicate URL is always 409 and `null` on a required `PATCH` field is 422. A public deployment also needs specs 003b-003d. Details in `docs/architecture.md` §7.
 
 ## Out of scope
 - Authentication/multi-tenant accounts, alerting/notifications, UI dashboard, non-HTTP checks (TCP, DNS), distributed workers.
