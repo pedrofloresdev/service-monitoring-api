@@ -1,6 +1,6 @@
 # 003b - Demo mode: rate limiting and client identification
 
-Status: draft (revised 2026-11-24 after `/sdd-clarify` pass 3)
+Status: draft (revised 2026-11-24 after `/sdd-clarify` pass 4)
 
 ## Context and goal
 Specs 003a, 003d and 003c make the API deployable as a public demo: seeded services, protection, a global cap and a per-host cap, a single enforced process, and a periodic reset. They don't limit what one client can do:
@@ -9,7 +9,7 @@ Specs 003a, 003d and 003c make the API deployable as a public demo: seeded servi
 
 Goal: while demo mode is on, every client gets a request budget, with a smaller budget for writes, and its own cap on visitor services. Clients are identified reliably behind a hosting proxy, and a forged header can't escape the limits. While demo mode is off, nothing in this spec applies.
 
-This spec depends on 003a (demo mode, caps, error order), 003d (single process) and 003c (the reset hook and the write gate). Implementation order: 003a, then 003d, then 003c, then 003b.
+This spec depends on 003a (demo mode, caps, error order), 003d (the project start command and the single process) and 003c (the reset hook and the write gate). Implementation order: 003a, then 003d, then 003c, then 003b.
 
 ## Users
 - **Visitor:** can explore the demo at a normal pace, and gets a clear 429 with a wait time if it goes too fast.
@@ -21,10 +21,10 @@ This spec depends on 003a (demo mode, caps, error order), 003d (single process) 
 - As the owner, behind my host's proxy each visitor is counted separately, and a client cannot escape its limits by forging a header.
 
 ## Definitions
-- **Liveness request:** an HTTP request whose path is exactly `/health`, with any method and any query string. `/health/` and `/Health` are not liveness requests.
+- **Liveness request:** an HTTP request whose path is exactly `/health`, with any method (a POST to `/health` is liveness too, not a write) and any query string. `/health/` and `/Health` are not liveness requests.
 - **Write request:** an HTTP request with method POST, PUT, PATCH or DELETE, on any path, including unknown paths. It is classified by method alone, before any processing.
 - **Counted request:** every HTTP request that is not a liveness request. That includes `GET /`, the interactive docs and API schema document, unknown paths, and `HEAD` and `OPTIONS` requests. Non-HTTP connections (the app serves none) are not counted.
-- **Connection address:** the IP address of the network peer as the application receives it, with any IPv6 zone ID removed. The project start command guarantees that the server never replaces it from forwarding headers (RF-12).
+- **Connection address:** the IP address of the network peer as the application receives it, with any IPv6 zone ID removed. 003d's project start command, with this spec's server options (RF-2), guarantees that the server never replaces it from forwarding headers.
 - **Client:** the key a request is counted under, derived from the client address (RF-6):
   - an IPv4 address is a client by itself;
   - an IPv4-mapped IPv6 address (`::ffff:a.b.c.d`) is the IPv4 client `a.b.c.d`;
@@ -33,7 +33,7 @@ This spec depends on 003a (demo mode, caps, error order), 003d (single process) 
 - **Sliding window:** a request accepted at time `t` counts toward a limit with window `W` while `now − t < W`, on a monotonic clock. A request exactly `W` seconds old no longer counts.
 
 ### Settings
-Read once at startup and validated only while demo mode is on (003a RF-2).
+Read once at startup and validated only while demo mode is on (003a RF-2). Integers use decimal digits only: no sign, no decimal point, no separators, no spaces.
 
 | Setting (environment variable) | Default | Valid values |
 |---|---|---|
@@ -43,23 +43,19 @@ Read once at startup and validated only while demo mode is on (003a RF-2).
 | Write window (`DEMO_RATE_WRITE_WINDOW_SECONDS`) | 60 | integer 1 to 3,600 |
 | Per-client visitor-service cap (`DEMO_PER_CLIENT_VISITOR_CAP`) | 3 | integer 1 to 003a's global visitor-service cap |
 | Trusted proxy hops (`DEMO_TRUSTED_PROXY_HOPS`) | 0 | integer 0 to 10 |
-| Maximum forwarded entries read (`DEMO_MAX_FORWARDED_ENTRIES`) | 100 | integer 10 to 1,000, and at least the trusted proxy hops |
+| Maximum forwarded entries read (`DEMO_MAX_FORWARDED_ENTRIES`) | 100 | integer 10 to 1,000 |
 | IPv6 grouping prefix length (`DEMO_IPV6_PREFIX_LENGTH`) | 64 | integer 32 to 128 |
 | Maximum tracked clients (`DEMO_RATE_MAX_CLIENTS`) | 10,000 | integer 100 to 100,000 |
 
 ## Functional requirements
 
-### Settings and start command
-- RF-1: WHILE demo mode is on, IF any 003b setting is unparsable or outside its valid values, or the per-client cap is greater than 003a's global visitor-service cap, THEN THE SYSTEM SHALL refuse to start with an error naming the environment variable (both variables for a cross-setting rule).
-- RF-2: THE SYSTEM SHALL provide one project start command for running the API. It reads `DEMO_MODE` with exactly the application's rules (003a RF-1), and runs the server as follows:
-  - while demo mode is on: forwarding-header handling off, so the connection address is never rewritten, and access logging off, so client addresses are not written to the server log;
-  - while demo mode is off: today's server settings.
-
-  The container image and the documentation use this command.
-- RF-3: WHILE demo mode is on, IF the application was not started by the project start command (for example, a platform overrides the start command), THEN THE SYSTEM SHALL refuse to start with `Demo mode must be started with the project start command (<command>)`.
+### Settings and server options
+- RF-1: WHILE demo mode is on, IF any 003b setting is unparsable or outside its valid values, or the per-client cap is greater than 003a's global visitor-service cap, THEN THE SYSTEM SHALL refuse to start with an error naming the environment variable (both variables for the cap rule). 003d's start command reports this together with the other settings errors.
+- RF-2: WHILE demo mode is on, THE SYSTEM SHALL have 003d's project start command run the server with forwarding-header handling off, so the connection address is never rewritten, and with access logging off, so client addresses are not written to the server log. While demo mode is off, the server options stay as today.
+- RF-3: THE SYSTEM SHALL rely on 003d RF-2 (the start marker) to guarantee that demo mode never runs under another start method, where the server might rewrite client addresses. This spec adds no second check.
 
 ### Rate limits
-- RF-4: WHILE demo mode is on, WHEN a counted request arrives, THE SYSTEM SHALL evaluate it against the client's general limit and, for a write request, also against the client's write limit, both over sliding windows. IF either limit is already reached, THEN THE SYSTEM SHALL answer HTTP 429 at once, before routing and before any other processing or error handling.
+- RF-4: WHILE demo mode is on, WHEN a counted request arrives, THE SYSTEM SHALL evaluate it against the client's general limit and, for a write request, also against the client's write limit, both over sliding windows. Both limits are evaluated for a write, even when the first is already reached, so the 429 can name every exceeded limit. IF either limit is already reached, THEN THE SYSTEM SHALL answer HTTP 429 at once, before routing and before any other processing or error handling.
 - RF-5: THE SYSTEM SHALL count only accepted requests:
   - a request answered 429 counts toward no limit;
   - an accepted request counts toward the general limit and, if it is a write request, toward the write limit, whatever happens next: any status, a client disconnect, or a 503 from 003c.
@@ -77,10 +73,10 @@ Read once at startup and validated only while demo mode is on (003a RF-2).
   - **Trusted proxy hops = 0 (the default):** the connection address. `X-Forwarded-For` is ignored.
   - **Trusted proxy hops = N > 0:** take all `X-Forwarded-For` header lines in order and join them with commas; split into entries; trim spaces; drop empty entries; keep only the last M entries, where M is the maximum forwarded entries read; take the Nth entry counted from the right (N = 1 is the rightmost, added by the nearest proxy).
   - **Accepted entry forms:**
-    - IPv4 in strict dotted-quad form (four decimal numbers 0 to 255, no leading zeros), optionally followed by `:port`;
-    - IPv6 in any RFC 4291 text form (hex case-insensitive, `::` compression, an embedded dotted quad), optionally in brackets, and with `:port` only when bracketed.
+    - IPv4 in strict dotted-quad form (four decimal numbers 0 to 255, no leading zeros), optionally followed by `:port`, never in brackets;
+    - IPv6 in any RFC 4291 text form (hex case-insensitive, `::` compression, an embedded dotted quad that follows the same strict IPv4 rules), optionally in brackets, and with `:port` only when bracketed.
 
-    A port must be decimal 1 to 65,535 without leading zeros, and is removed.
+    A port must be decimal 1 to 65,535 without leading zeros, and is removed. An empty port (`1.2.3.4:`) is invalid.
   - **Rejected entry forms:** zone IDs and anything else.
   - **Fallback:** IF the header is missing, has fewer than N entries after dropping empty ones, or the selected entry is invalid, THEN use the connection address.
 
@@ -90,7 +86,8 @@ Read once at startup and validated only while demo mode is on (003a RF-2).
 - RF-9: WHILE demo mode is on, IF a create request comes from a client whose number of attributed visitor services is already at or above the per-client cap, THEN THE SYSTEM SHALL reject it with HTTP 409 and `{"detail": "Demo limit reached: at most <C> visitor services per client."}`.
   - The order is in 003a RF-16: global cap, then per-client cap, then per-host cap.
   - The per-client cap is checked before the spec 002 hostname check, then re-checked in 003a's atomic store step (003a RF-15), together with the global and per-host caps.
-  - That one step covers the re-checks, storing the service, the commit, and recording the attribution, with no network lookup inside. So the database and the attribution never disagree, and concurrent requests can't exceed any cap.
+  - That one step covers the re-checks, storing the service, the commit, and recording the attribution, with no network lookup inside. It is serialized process-wide (one create at a time inside the step), so the database and the attribution never disagree and concurrent requests can't exceed any cap.
+  - The rate limiter uses its own, separate synchronization and never waits for this step (RNF-2).
   - The one exception is after a restart (RF-11).
 - RF-10: THE SYSTEM SHALL change attribution only as follows:
   - record it in the atomic step of a committed create (RF-9);
@@ -101,39 +98,40 @@ Read once at startup and validated only while demo mode is on (003a RF-2).
 
 ### State and privacy
 - RF-11: THE SYSTEM SHALL keep rate-limit counters and attribution in memory only:
-  - For each client and limit, at most L timestamps (that limit's count) are kept. Memory therefore stays below the maximum tracked clients × (general limit + write limit) timestamps, plus attribution.
-  - Counters for a client are dropped once its windows hold no requests.
+  - For each client and limit, at most L timestamps (that limit's count) are kept. Memory therefore holds at most the maximum tracked clients × (general limit + write limit) timestamps, plus attribution.
+  - Counters for a client are dropped once its windows hold no requests. This is checked when the client is next seen, and by a light sweep every general window, so an idle process shrinks too.
   - IF a new client would exceed the maximum tracked clients, THEN the counters of the client tracked longest without a request are dropped first. An active client is dropped only if more than the maximum of distinct clients arrive after its last request.
   - Attribution is never dropped by this rule. 003a's global cap bounds it.
   - Everything is lost on restart. Visitor services that survive a restart then count only toward the global and per-host caps until they are deleted or reset, so a client may hold more than the per-client cap until the next reset. Accepted.
-- RF-12: THE SYSTEM SHALL NOT store client addresses in the database or write them to the application's own logs. With the project start command in demo mode, the server writes no access log (RF-2).
-- RF-13: IF the rate limiter itself fails unexpectedly for a request, THEN THE SYSTEM SHALL log the error and process the request as accepted (fail open), so a limiter fault never takes the API down (constitution principle 6).
+- RF-12: THE SYSTEM SHALL NOT store client addresses in the database or write them to the application's own logs, including error logs from this feature. With the server options in demo mode, the server writes no access log (RF-2).
+- RF-13: IF the rate limiter's counters fail unexpectedly for a request, THEN THE SYSTEM SHALL log the error (without the client address) and process the request without counting it (fail open), so a limiter fault never takes the API down. This deliberately trades some protection (constitution principle 7) for availability. The per-client cap is not covered: it is part of the create's atomic step, and an error there fails the create like any other unexpected error.
 - RF-14: WHILE demo mode is off, THE SYSTEM SHALL not rate-limit, identify clients or apply the per-client cap.
 - RF-15: THE SYSTEM SHALL document:
   - the limits and defaults, the sliding-window rule, the 429 response and the request classification;
   - client identification, and how to set trusted proxy hops for a deployment (and why the app must then be reachable only through the proxy);
-  - the project start command, and why demo mode refuses without it;
+  - the server options in demo mode (RF-2), and that demo mode runs only through 003d's start command;
   - that platform health probes should use `/health`, because other paths are counted;
   - the `unknown` client;
   - the per-client cap and its restart exception;
-  - the memory bound;
+  - the memory bound and the eviction behavior;
   - the in-memory, single-process state.
 
   The detailed reference goes in the architecture document. The product SPEC and the README "Running a public demo" section (created by 003a) summarize it and link there.
 
 ## Non-functional requirements
-- RNF-1: With demo mode off, behavior does not change, except that the container starts through the project start command, which runs the server with today's settings. All existing tests pass with unchanged outcomes, and the API schema document is identical.
+- RNF-1: With demo mode off, behavior does not change. All existing tests pass with unchanged outcomes, and the API schema document is identical.
 - RNF-2: Rate limiting never makes a request wait: each counted request is accepted or rejected immediately. A wait that 003c imposes on an accepted write is not part of rate limiting.
 - RNF-3: Counters, attribution and the per-client cap are safe under concurrent requests.
 - RNF-4: The window logic, the `X-Forwarded-For` parsing and the client grouping are pure functions with tests written first (constitution principle 4). Time-based behavior is tested with an injectable monotonic clock, never by waiting.
 - RNF-5: **Benchmarks** (measured and recorded in the validation notes; not CI gates):
   - the added time per request for the limit check is under 1 ms at the 95th percentile;
   - with 10,000 distinct clients at default limits, memory stays within the stated bound, and tracked counters shrink to empty once the windows pass.
-- RNF-6: The change to the container's start command needs owner approval in the plan (AGENTS.md: Docker config is ask-first).
+- RNF-6: The server options are passed through 003d's start command. The container change itself belongs to 003d and its approval.
 - RNF-7: The spec 000 to 003c and 003d quality gates stay green.
 - RNF-8: Automated tests cover, at minimum:
-  - RF-1, including per-client cap > global cap, and forwarded entries < hops;
-  - RF-2 and RF-3: the start command in demo mode on and off, and refusal when the app is started another way;
+  - RF-1, including per-client cap > global cap;
+  - RF-2: the server options in demo mode on and off;
+  - tests that need a client address inject it, because the test client's address isn't an IP address (it would be the `unknown` client);
   - each limit at `W − ε`, `W` and `W + ε`;
   - 429 not counting, and a write rejected by the general limit not counting toward the write limit;
   - `Retry-After` and the message for one limit, both limits and `S = 1`, and a `HEAD` 429 with `Retry-After` and no body;
@@ -145,7 +143,7 @@ Read once at startup and validated only while demo mode is on (003a RF-2).
   - a connection address with a zone ID, IPv4-mapped addresses, IPv6 grouping at the configured prefix, and the `unknown` client;
   - the per-client cap at and above its boundary and under concurrency;
   - attribution changing only on committed creates, deletes and resets;
-  - counter eviction at the maximum without dropping attribution;
+  - counter eviction at the maximum without dropping attribution, and the sweep shrinking an idle process;
   - RF-13 fail-open;
   - demo mode off changing nothing except RNF-1's exception.
 
@@ -178,7 +176,7 @@ Read once at startup and validated only while demo mode is on (003a RF-2).
 - With demo mode on, a client over either limit gets 429 with the correct `Retry-After` and message, and gets through once the window allows, in automated tests (injectable clock) and in a manual run against the running stack.
 - Client identification behaves as RF-8 with 0 and N hops, including a forged header and every parsing case in RNF-8.
 - The per-client cap returns its 409 in the 003a RF-16 order and is released on delete and after a committed reset.
-- With demo mode on, the container starts through the project start command with forwarding headers and the access log off. Starting the app another way refuses.
+- With demo mode on, the server runs with forwarding headers and the access log off (through 003d's start command).
 - With demo mode off, all existing tests pass unchanged and the API schema document is identical.
 - The RNF-5 benchmarks are measured and recorded. The docs are updated per RF-15. The quality gates are green in CI.
 
@@ -202,6 +200,20 @@ Earlier decisions (D1 to D12, G1 to G15) still apply unless refined here. All of
 - **K12 (4.2) – pure functions:** the parser, the grouping and the window logic are pure and tested first (RNF-4).
 - **K13 (4.5) – limiter failure:** fail open, with an error log (RF-13), to keep the API up. Accepted risk: a limiter bug briefly disables limits.
 - **K14 (2.6, 3.9, 3.5, 3.6, 3.8) – documented edge cases:** README section ownership, health probes, key changes after a config change, long `Retry-After` values, and replacing proxies.
+
+- **P1 (owner, decision 1 of pass 4) – start command moved to 003d:** this spec now only supplies the demo-mode server options (RF-2) and relies on 003d's start marker (RF-3). K1 is superseded. This resolves findings 1.1, 1.2, 1.3 and 3.1 (detection, `.env` parsing, command scope, process model), which 003d now owns.
+- **P2 (1.4) – process-wide serialization:** the atomic step is serialized across the process and contains no network lookup. The limiter has its own synchronization and never waits for it.
+- **P3 (1.5) – shrinking:** lazy pruning plus a light sweep every general window, so an idle process frees its memory.
+- **P4 (1.6, 4.1) – fail-open scope:** counters only, uncounted, logged without the address. The tension with principle 7 is stated and accepted.
+- **P5 (1.7, 1.7b) – parsing and evaluation:** bracketed IPv4 is invalid, an embedded dotted quad follows the strict IPv4 rules, an empty port is invalid, and both limits are evaluated for writes.
+- **P6 (2.1) – unreachable rule removed:** "forwarded entries ≥ hops" could never fail with the given ranges, so the rule and its test are gone.
+- **P7 (2.2, 2.3, 3.3, 3.4, 3.6) – fixes:**
+  - the connection-address reference is corrected;
+  - the memory bound says "at most";
+  - any method on `/health` is liveness;
+  - tests inject client addresses;
+  - error logs exclude client addresses.
+- **P8 (3.2) – eviction:** added to the docs list.
 
 ## Open questions
 - (none)

@@ -1,6 +1,6 @@
 # 003a - Demo mode: seeding, protection and caps
 
-Status: draft (revised 2026-11-24 after `/sdd-clarify` pass 3)
+Status: draft (revised 2026-11-24 after `/sdd-clarify` pass 4)
 
 ## Context and goal
 The API is a portfolio piece, so it should be deployable as a public demo that anyone can try without setup. Deployed as it is today, a public instance is open to misuse:
@@ -11,11 +11,11 @@ Goal: an opt-in **demo mode**, switched on by a deployment setting. In demo mode
 - creates and maintains a configured set of example services (**seeded services**), protected from visitor changes, whose history comes only from real checks;
 - lets visitors try every endpoint, within a global cap, a per-host cap and a minimum check interval.
 
-With demo mode off, the API behaves as today, with one deliberate fix: a duplicate URL never causes a 500 (RF-14).
+With demo mode off, the API behaves as today, with two deliberate fixes: a duplicate URL never causes a 500 (RF-14), and a PATCH that sets a required field to `null` gets a 422 instead of a 500 (RF-19). RNF-1 lists every change.
 
 Demo mode is delivered by four specs. All four must be implemented before a public deployment:
 - **003a (this spec):** seeding, protection and caps.
-- **003d:** the single-process lock.
+- **003d:** the project start command and the single-process lock.
 - **003c:** the periodic reset and the reset notice. It depends on 003a and 003d.
 - **003b:** rate limits, client identification and the per-client cap. It depends on 003a, 003c and 003d.
 
@@ -40,12 +40,13 @@ Roadmap: 003a to 003d are inserted. metrics-retention becomes 004, alerting 005,
 - **Visitor service:** a service created through the API while demo mode is on. It stays a visitor service even if demo mode is later switched off and on again.
 - **Ordinary service:** any other service: one that existed before this feature was installed, one created while demo mode was off, or one that was seeded and later removed from the seed list.
 - **Service origin:** which of the three kinds above a service is. It is stored with the service and is not part of any API response.
+- **Normalized URL:** the text the API's URL parser produces for a URL. That is what the API stores today. When matching seeds (RF-5) or checking duplicates (RF-14), stored URLs are parsed again with the same parser, so a row written outside the API in another form (for example `http://Example.com`) still matches.
 - **Cap host:** the host used to count services toward the per-host cap. It is derived from a service's stored URL: the host the API's URL parser produces, lower-cased, with any trailing dot removed and internationalized names in their ASCII (punycode) form, without brackets for IPv6 literals and without the port.
   - Stored URLs themselves are not changed.
   - An IP literal is its own cap host, and `www.example.com` and `example.com` are different cap hosts.
 
 ### Settings
-Read once at startup.
+Read once at startup. Integers use decimal digits only: no sign, no decimal point, no separators, no spaces.
 
 | Setting (environment variable) | Default | Valid values |
 |---|---|---|
@@ -57,10 +58,10 @@ Read once at startup.
 
 **Seed list format:** a JSON array of objects.
 - `name`: string, 1 to 100 characters, required.
-- `url`: string, required. It must not contain user information (`user:pass@`).
+- `url`: string, required. It must be a URL the API's own `url` field accepts (`http` or `https`, same length and syntax rules), and must not contain user information (`user:pass@`).
 - `expected_status`: JSON integer, 100 to 599, optional. Default: the API's default.
 - `check_interval`: JSON integer, 10 to 86,400, optional. Default: the API's default check interval. The demo minimum does not apply to seeded services.
-- Any other key, a value of the wrong JSON type (for example a string or a float), or a top-level value that isn't an array is invalid.
+- Any other key, a value of the wrong JSON type (for example a string, a float or `true` for a number), or a top-level value that isn't an array is invalid.
 - Duplicate names are allowed.
 
 ## Functional requirements
@@ -68,19 +69,19 @@ Read once at startup.
 ### Settings and startup
 - RF-1: THE SYSTEM SHALL read the demo mode setting always. IF it is set to an invalid value, THEN THE SYSTEM SHALL refuse to start with an error naming `DEMO_MODE`.
 - RF-2: WHILE demo mode is off, THE SYSTEM SHALL not parse or validate the other demo settings (of 003a to 003d), so a malformed value never affects startup.
-- RF-3: WHILE demo mode is on, IF any 003a setting is unparsable or outside its valid values, THEN THE SYSTEM SHALL refuse to start with an error naming the environment variable.
-- RF-4: WHILE demo mode is on, THE SYSTEM SHALL validate every seed definition as in Settings and with spec 002 URL safety, resolving all seed hostnames concurrently so the whole check takes about one resolution timeout. IF a definition is invalid, is rejected by spec 002 (including a hostname that resolves to a non-public address), or has the same normalized URL as another definition, THEN THE SYSTEM SHALL refuse to start with an error naming the definition by position and name. Errors SHALL never include user information or resolved addresses. A hostname that cannot be resolved is accepted, as in spec 002 RF-4.
+- RF-3: WHILE demo mode is on, IF any 003a setting is unparsable or outside its valid values, or the per-host cap is greater than the global cap, THEN THE SYSTEM SHALL refuse to start with an error naming the environment variable (both variables for the cap rule). 003d's start command reports this together with the other settings errors.
+- RF-4: WHILE demo mode is on, THE SYSTEM SHALL validate every seed definition as in Settings and with spec 002 URL safety, resolving all seed hostnames concurrently so the whole check takes about one resolution timeout. IF a definition is invalid, is rejected by spec 002 (including a hostname that resolves to a non-public address), or has the same normalized URL as another definition, THEN THE SYSTEM SHALL refuse to start with an error naming `DEMO_SEED_SERVICES` and the definition by its 1-based position, plus its name when the name itself is valid. Errors SHALL never include user information or resolved addresses. A hostname that cannot be resolved is accepted, as in spec 002 RF-4.
 
 ### Seeded services
 - RF-5: WHILE demo mode is on, WHEN the system starts and WHEN spec 003c runs a reset, THE SYSTEM SHALL make these data changes so that each seeded service exists exactly once, matched by normalized URL, with the seed list's name, expected status and check interval, active, and with origin "seeded":
   - A missing seeded service is created.
   - A service whose normalized URL matches a seed definition becomes seeded, whatever its origin was. Its fields are corrected, it is reactivated if it was inactive, and its stored checks are kept.
 
-  Schedules follow the data. At startup, the scheduler is started afterwards and schedules every active service. At a reset, spec 003c brings the schedules in line after the commit.
+  RF-5 makes these changes inside the caller's transaction and doesn't commit on its own. At startup, the changes (with RF-6) are committed as one transaction. At a reset, they are part of 003c's reset transaction. Schedules follow the data: at startup the scheduler is started afterwards and schedules every active service; at a reset, 003c brings the schedules in line after the commit.
 - RF-6: WHILE demo mode is on, WHEN the system starts, THE SYSTEM SHALL change every service with origin "seeded" whose normalized URL is not in the seed list to origin "ordinary".
 - RF-7: IF seeding at startup (RF-5, RF-6) fails, THEN THE SYSTEM SHALL refuse to start with an error. It SHALL never serve requests half-seeded.
-- RF-8: WHILE demo mode is on, WHEN the scheduler starts, THE SYSTEM SHALL run the first check of each seeded service immediately, not one interval later. Frequent restarts therefore never starve a seeded service of checks.
-- RF-9: THE SYSTEM SHALL NOT generate, backfill or alter metrics of seeded services, and the system SHALL never delete them. Their history comes only from real checks (constitution principle 1). Deleting a service through the API with demo mode off still deletes its checks, as today; that is an owner action, not a system deletion.
+- RF-8: WHILE demo mode is on, WHEN the scheduler starts, THE SYSTEM SHALL start the first check of each seeded service immediately, not one interval later. None of these first checks is skipped, even when they have to wait for free check workers (for example 20 seeds with slow targets). Frequent restarts therefore never starve a seeded service of checks.
+- RF-9: THE SYSTEM SHALL NOT generate, backfill or alter metrics of seeded services, and the system SHALL never delete them. Their history comes only from real checks (constitution principle 1). Deleting a service through the API still deletes its checks, as today: the owner's deletes with demo mode off, and visitors' deletes of visitor services with demo mode on. These are deletes requested through the API, not system deletions.
 
 ### Protection
 - RF-10: WHILE demo mode is on, WHEN a request updates (including with an empty body) or deletes a seeded service, THE SYSTEM SHALL reject it with HTTP 403 and `{"detail": "Seeded demo services cannot be changed."}`, and SHALL not change the service or its schedule.
@@ -96,7 +97,7 @@ Read once at startup.
 
   A value outside the API's own range (for example 5) fails request validation first. On an update, this applies even when the value equals the service's current one.
 - RF-14: THE SYSTEM SHALL answer HTTP 409 with `{"detail": "A service with this URL already exists"}` whenever a create or update would give two services the same normalized URL, whether demo mode is on or off.
-  - This includes concurrent requests: no request ever returns 500 because of a duplicate URL.
+  - This includes concurrent requests: no request ever returns 500 because of a duplicate URL. Only a violation of the URL's uniqueness becomes this 409. Any other database error is not reported as a duplicate.
   - An update that keeps a service's own URL is not a duplicate.
   - This deliberately replaces today's 500 on update, and closes the gap recorded during spec 002.
 - RF-15: WHILE demo mode is on, THE SYSTEM SHALL reject with HTTP 409:
@@ -107,7 +108,7 @@ Read once at startup.
 - RF-16: WHEN a request is rejected for more than one reason, THE SYSTEM SHALL answer with the first that applies, in this order:
   - **Create:** 422 request validation (including spec 002's literal check), then 422 demo minimum interval (RF-13), then 409 global cap, then 409 per-client cap (spec 003b), then 409 per-host cap, then 422 spec 002 hostname check, then 409 duplicate URL.
   - **Update:** 422 request validation (including spec 002's literal check), then 404, then 403 (RF-10, RF-11), then 422 demo minimum interval (RF-13), then 409 per-host cap, then 422 spec 002 hostname check, then 409 duplicate URL.
-  - **Delete:** 404, then 403 (RF-10, RF-11).
+  - **Delete:** 422 request validation (for example a non-numeric id), then 404, then 403 (RF-10, RF-11).
 
   The only exception is concurrency: a cap filled by another request during this request's hostname check gives a 409 cap from the atomic re-check (RF-15). With demo mode off, the order is today's (spec 002) plus RF-14. Spec 003b adds its 429 ahead of everything, and spec 003c may hold a write during a reset before any of these checks.
 
@@ -121,10 +122,12 @@ Read once at startup.
 
   The detailed reference goes in the architecture document. The product SPEC summarizes it and links there. The README gets a "Running a public demo" section, which 003b to 003d extend. The product SPEC roadmap SHALL show 003a to 003d, the implementation order and the new numbering.
 - RF-18: WHILE demo mode is off, THE SYSTEM SHALL not seed, cap or protect anything, and every service SHALL behave as an ordinary service. Service origins are kept.
+- RF-19: WHEN an update request sets `name`, `url`, `expected_status`, `check_interval` or `is_active` to `null`, THE SYSTEM SHALL reject it with HTTP 422 in the existing request-validation error format, with one entry per such field, type `null_not_allowed` and message `<field> cannot be null`. This applies whether demo mode is on or off, and replaces today's 500. It is part of request validation, so it comes first in the RF-16 order.
 
 ## Non-functional requirements
 - RNF-1: With demo mode off, behavior does not change, except:
   - RF-14;
+  - RF-19;
   - an invalid `DEMO_MODE` refusing startup (RF-1);
   - the stored service origin.
 
@@ -145,7 +148,10 @@ Read once at startup.
   - RF-12, with and without `check_interval`;
   - RF-13 on create and update (present, absent, equal to current, below the API range);
   - each cap at and above its boundary, a lowered cap, cap host derivation (case, trailing dot, port, punycode, IPv6), and concurrency;
-  - RF-14 with demo mode on and off, own URL, and concurrent duplicates;
+  - RF-14 with demo mode on and off, own URL, concurrent duplicates, a legacy non-canonical stored URL, and a non-URL database error not turned into a duplicate;
+  - RF-19 for each field, with demo mode on and off;
+  - the per-host > global cap refusal, integer spellings, and a seed URL the API would reject;
+  - RF-8 with more seeds than check workers and slow targets, and no first check skipped;
   - the RF-16 order for create, update and delete;
   - demo mode off changing nothing except RNF-1's exceptions.
 
@@ -162,6 +168,7 @@ Read once at startup.
 - A visitor service is deactivated: it still counts toward the caps.
 - The owner raises the demo minimum interval: existing visitor services keep their interval until they are updated (RF-13 then applies) or reset. The same holds for a visitor service created before demo mode was last switched off.
 - Visitor services aimed at the demo's own public address: allowed by spec 002, and limited by the per-host cap.
+- Aliases of one target (other hostnames, CNAMEs, subdomains, an IP literal) are separate cap hosts, so only the global cap bounds them together. Accepted and documented.
 - A fresh deployment: seeded services get their first check immediately (RF-8), so the status endpoint shows them within seconds.
 - A seeded service's expected status changes: checks stored before the change keep their stored result. Status and uptime briefly mix both expectations. No metric is altered (constitution principle 1).
 - 003a deployed without 003b to 003d: demo mode works but isn't safe for public use. This is documented (RF-17) and is not enforced.
@@ -171,7 +178,6 @@ Read once at startup.
 - Authentication, accounts or ownership (roadmap 007).
 - Synthetic history for seeded services, and retention (roadmap 004).
 - Showing a service's origin in API responses.
-- A PATCH with `url: null` (a known gap from spec 002). It remains for a later spec.
 
 ## Completion criteria
 - With demo mode on and a seed list configured, a fresh start creates exactly the seeded services and checks each of them at once. A restart keeps them once each, with their history intact.
@@ -197,6 +203,21 @@ Earlier decisions (D1 to D27 of the original 003, E1 to E12 of pass 2) still app
 - **H12 (2.6) – owner deletes:** an API delete with demo mode off still deletes checks. That's an owner action, outside RF-9.
 - **H13 (2.7, 3.1, 3.3, 3.5, 3.7) – documented edge cases:** 003a alone isn't safe for public use; existing services become ordinary; trailing-dot URL variants share a cap host; visitor services may share a seeded host; old intervals below a raised minimum stay until updated.
 - **H14 (3.6) – concurrency tests:** the update path that changes the host is included (RNF-3).
+
+- **Q1 (owner, decision 5 of pass 4) – `null` on required fields:** a PATCH that sets a required field to `null` returns 422 everywhere, instead of 500 (RF-19, finding 3.1). It includes `url: null`, so that spec 002 gap is closed too.
+- **Q2 (1.1) – normalized URL:** defined. Stored rows are parsed again for seed matching and duplicate checks, so rows written outside the API still match. This applies the spec 002 lesson.
+- **Q3 (1.2) – cross-setting rule:** per-host cap ≤ global cap refuses startup, naming both variables, as 003b does for its own rule.
+- **Q4 (1.3) – transaction boundary:** RF-5 doesn't commit on its own. Startup commits it as one transaction, and a reset includes it in its own transaction.
+- **Q5 (1.4, 1.5) – seed URL rules and integers:**
+  - a seed URL must pass the API's own `url` rules;
+  - errors name `DEMO_SEED_SERVICES` with a 1-based position;
+  - integers use decimal digits only;
+  - `true` is the wrong type for numbers.
+- **Q6 (2.1, 2.2) – fixes:** the Context lists both fixes and points to RNF-1, and Delete starts with 422 for a malformed id.
+- **Q7 (3.1) – precise duplicate detection:** only a URL-uniqueness violation becomes the duplicate 409 (RF-14).
+- **Q8 (3.2) – first checks:** no seeded first check is skipped when check workers are busy (RF-8).
+- **Q9 (3.3) – aliases:** they slip past the per-host cap. Accepted and documented; the global cap still bounds them.
+- **Q10 (4.1) – visitor deletes:** stated as API-requested deletes, not system deletions (RF-9).
 
 ## Open questions
 - (none)
