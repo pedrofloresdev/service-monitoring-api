@@ -38,7 +38,7 @@ Read once at startup, validated only while demo mode is on (003a RF-2). Integers
 |---|---|---|
 | Lock wait timeout (`DEMO_LOCK_WAIT_SECONDS`) | 60 | integer 0 to 3,600 (0 = one attempt only) |
 | Heartbeat interval (`DEMO_LOCK_HEARTBEAT_SECONDS`) | 10 | integer 1 to 300 |
-| Heartbeat and connect timeout (`DEMO_LOCK_TIMEOUT_SECONDS`) | 5 | integer 1 to 60, and below the heartbeat interval |
+| Heartbeat timeout (`DEMO_LOCK_TIMEOUT_SECONDS`) | 5 | integer 1 to 60, and below the heartbeat interval |
 | Dead-connection detection (`DEMO_LOCK_KEEPALIVE_SECONDS`) | 30 | integer 10 to 600 |
 | Lock name (`DEMO_LOCK_NAME`) | `service-monitoring-api-demo` | 1 to 100 characters of letters, digits, `-` and `_` |
 
@@ -52,7 +52,7 @@ Read once at startup, validated only while demo mode is on (003a RF-2). Integers
   - runs the database migrations in a separate child process, so their logging setup and module state never leak into the server, passing it the same `DATABASE_URL` the settings resolved;
   - then runs the server in its own process, without auto-reload, on host `0.0.0.0` and the port from `PORT` (default 8000).
 
-  While demo mode is on, the server runs as a single worker. While demo mode is off, the worker count and the other server options are as the container uses today (`WEB_CONCURRENCY` honored). 003b adds its server options for demo mode. The container image starts this command directly as its main process, so it receives stop signals itself (RNF-5).
+  While demo mode is on, the server runs as a single worker. The start command collects all demo-mode server options in one place, which later specs extend (003b adds its options there) and tests can inspect. While demo mode is off, the worker count and the other server options are as the container uses today (`WEB_CONCURRENCY` honored). 003b adds its server options for demo mode. The container image starts this command directly as its main process, so it receives stop signals itself (RNF-5).
 - RF-2: WHILE demo mode is on, IF the application was not started by the project start command (for example, a platform overrides the start command, or the server is run with auto-reload or several workers), THEN THE SYSTEM SHALL refuse to start with `Demo mode must be started with the project start command (python -m app.serve)`. The application recognizes the command by a marker the command sets in memory, in a module of the application (not the start command's own module, and not an environment variable), in the same process just before starting the server. The application checks it at startup, before seeding (003c RF-2). Processes spawned by auto-reload or extra workers don't share that memory, so they don't have it.
 - RF-3: WHILE demo mode is on, THE SYSTEM SHALL read `WEB_CONCURRENCY` in the start command before anything else. Unset or empty means 1.
   - IF it is not decimal digits for a number of at least 1, THEN THE SYSTEM SHALL refuse with an error naming it.
@@ -66,10 +66,10 @@ Read once at startup, validated only while demo mode is on (003a RF-2). Integers
   6. run the migrations (child process);
   7. remove the start command's own stop-signal handling, so the server handles stop signals from now on, then start the server.
 
-  A failure at any step ends the process with a non-zero status and a clear error. A stop signal during step 6 ends the migration child and the process within about one second; PostgreSQL rolls back a revision that hadn't finished. A stop signal after step 7 is handled by the server, which acts on it only once application startup has finished (at most the startup bound of 003c RF-3). Docker's stop grace period may then kill the process, which releases the lock like a crash (RF-6).
+  A failure at any step ends the process with a non-zero status and a clear error. A stop signal during step 6 ends the migration child and the process within about one second, with exit status 0; PostgreSQL rolls back a revision that hadn't finished. A stop signal after step 7 is handled by the server, which acts on it only once application startup has finished (at most the startup bound of 003c RF-3). Docker's stop grace period may then kill the process, which releases the lock like a crash (RF-6).
 
 ### Taking and holding the lock
-- RF-5: WHILE demo mode is on, THE SYSTEM SHALL open the lock connection and try to take the demo lock, identified by a 64-bit key derived from the lock name and the database name. While waiting, each connect attempt has a one-second connect timeout, so a stop signal is honored within about one second. The lock connection uses `DATABASE_URL` from the settings, keeps its query parameters, and its own lock options take precedence. Behavior while trying:
+- RF-5: WHILE demo mode is on, THE SYSTEM SHALL open the lock connection and try to take the demo lock, identified by a 64-bit key derived from the lock name and the database name. While waiting, each connect attempt has a 2-second connect timeout (the lowest the database client allows). A stop signal doesn't wait for an attempt in progress: the process abandons it and exits. The lock connection uses `DATABASE_URL` from the settings, keeps its query parameters, and its own lock options take precedence. Behavior while trying:
   - IF the lock is held by another process, or the database can't be reached (connection refused or timed out), THEN THE SYSTEM SHALL try again every second until the lock wait timeout ends (one attempt when it is 0).
   - IF the database rejects the connection for a permanent reason (wrong credentials, missing database, unsupported server), THEN THE SYSTEM SHALL refuse at once with `Demo mode could not connect to the database: <reason>`, without retrying and without the password in the message.
   - IF it gets a stop signal (SIGTERM or SIGINT) while waiting, THEN THE SYSTEM SHALL exit with status 0 within about one second, without taking the lock or running migrations.
@@ -83,6 +83,7 @@ Read once at startup, validated only while demo mode is on (003a RF-2). Integers
   - end the process immediately with exit status 1, without a graceful server shutdown (requests in progress are dropped). This happens within the heartbeat timeout plus 2 seconds of the failed heartbeat's start, so the platform restarts it. The restarted process then follows RF-4. A failure during the migrations also ends the migration child.
 
   A reset that is running is rolled back by the database when the connection ends. This is the one interruption 003c RF-8 allows.
+- RF-7a: WHILE demo mode is on, THE SYSTEM SHALL let other parts of the application ask whether this process holds the demo lock right now. The answer comes from a fresh query of the database's lock table on the lock connection, with the heartbeat timeout, not from the last heartbeat. Anything other than a confirmed "held" (an error or a timeout) counts as not held. 003c uses this just before committing a reset.
 - RF-8: WHILE demo mode is off, THE SYSTEM SHALL not take the lock, apply RF-3, require PostgreSQL or check the start marker. The start command still runs the migrations and the server as described in RF-1.
 
 ### Container and documentation
@@ -184,6 +185,10 @@ Earlier decisions I1 to I8 still apply unless refined here. Items marked "owner"
 - **R13 (3.4) – lock check and key:** the heartbeat confirms the key in the database's lock table. The key is a 64-bit value derived from the lock name and the database name.
 - **R14 (3.6) – connection settings:** the lock connection and the migration child use the same resolved `DATABASE_URL`. Its query parameters are kept, and the lock options take precedence.
 - **R15 (4.1) – fixed start period:** documented as fixed, to be raised by hand with the settings.
+- **R16 (confirmation pass) – connect timeout:** it is 2 s, libpq's minimum, and a stop signal abandons an attempt in progress instead of waiting for it. `DEMO_LOCK_TIMEOUT_SECONDS` is the heartbeat timeout only.
+- **R17 (confirmation pass) – lock status:** RF-7a gives 003c a fresh check of whether the process still holds the lock.
+- **R18 (confirmation pass) – server options:** the start command collects them in one place that 003b extends.
+- **R19 (confirmation pass) – exit status:** a stop signal during the migrations exits 0.
 
 ## Open questions
 - (none)

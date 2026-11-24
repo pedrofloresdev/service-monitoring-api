@@ -120,7 +120,7 @@ Read once at startup and validated only while demo mode is on (003a RF-2). Integ
   The detailed reference goes in the architecture document. The product SPEC and the README "Running a public demo" section (created by 003a) summarize it and link there.
 
 ## Non-functional requirements
-- RNF-1: With demo mode off, this spec changes nothing. All existing tests pass with unchanged outcomes, apart from changes made by 003a (RF-14, RF-19), and the API schema document is identical.
+- RNF-1: With demo mode off, this spec changes nothing. All existing tests pass with unchanged outcomes, apart from changes made by the other demo specs (003a RF-14 and RF-19, 003c RF-10, and 003d's start command), and the API schema document is identical.
 - RNF-2: Rate limiting never makes a request wait: each counted request is accepted or rejected immediately. A wait that 003c imposes on an accepted write is not part of rate limiting.
 - RNF-3: Counters, attribution and the per-client cap are safe under concurrent requests.
 - RNF-4: The window logic, the `X-Forwarded-For` parsing and the client grouping are pure functions with tests written first (constitution principle 4). Time-based behavior is tested with an injectable monotonic clock, never by waiting.
@@ -229,6 +229,7 @@ Earlier decisions (D1 to D12, G1 to G15) still apply unless refined here. All of
   - the attribution exceptions listed in full.
 - **U8 (3.2) – invalid proxy entries:** logged as a warning at most once a minute, without addresses.
 - **U9 (3.3) – reset notification:** synchronous, before 003c opens the gate (003c RF-5).
+- **U10 (confirmation pass) – server options:** the place that collects them is now defined in 003d RF-1. RNF-1 lists every change made by the other demo specs.
 
 ## Open questions
 - (none)

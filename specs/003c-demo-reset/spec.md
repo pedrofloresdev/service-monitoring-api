@@ -54,14 +54,14 @@ Read once at startup, validated only while demo mode is on (003a RF-2). Integers
   5. start the demo jobs (the slot job, the poll and any retry).
 
   It starts serving requests only after step 5. A failure in steps 1 and 2 refuses startup. A failed reset in step 3 is handled as in RF-9, and startup continues. At startup, step 4 is the schedule reconciliation.
-- RF-3: The maximum time from start to serving, with default settings, is about: 003d's lock wait + the migrations + one resolution timeout (seed validation) + less than twice the reset maximum duration (RF-8). THE SYSTEM SHALL document it. 003d RF-9 sizes the container's healthcheck start period from it.
+- RF-3: The maximum time from start to serving, with default settings, is about: 003d's lock wait + the migrations + one resolution timeout (seed validation) + less than twice the reset maximum duration (RF-8). The write drain takes no time at startup, because no writes have been admitted yet. 003d keeps a 5 s margin for it anyway. THE SYSTEM SHALL document it. 003d RF-9 sizes the container's healthcheck start period from it.
 
 ### Reset
 - RF-4: WHEN a reset starts, THE SYSTEM SHALL fix the slot it serves as the current slot at that moment, then:
   - close the gate to new writes (RF-7);
   - wait for writes in progress to finish, up to the write wait setting. IF they haven't finished by then, THEN the attempt is a failed reset (RF-9) and the gate opens again;
   - in one database transaction: delete every visitor service and, explicitly, its stored checks (not relying on the database's cascade), apply 003a RF-5 to the seeded services, and store the fixed slot as the last completed slot;
-  - just before committing, confirm that this process still holds the demo lock (003d). If not, roll back, and the attempt is a failed reset.
+  - just before committing, confirm that this process still holds the demo lock with a fresh check (003d RF-7a). If it isn't confirmed, roll back, and the attempt is a failed reset.
 
   The data changes and the slot are committed together or not at all. Seeded and ordinary services and their stored checks are kept.
 - RF-5: WHEN a reset's transaction commits, THE SYSTEM SHALL:
@@ -173,7 +173,7 @@ This is a standing exception to constitution principle 1 ("never ... drop ... a 
 - A visitor retries a 503 at once several times: each attempt counts toward 003b's write limit, so it may get a 429. Documented.
 - A read request that overlaps a reset may see some data from before and some from after. Only that request is affected. Accepted.
 - Demo mode is switched off and on again within the same slot: no reset is due, so visitor services left from before stay until the next slot. Accepted and documented.
-- The lock is lost while a reset runs: the reset checks the lock just before committing (RF-4), and the process exits soon after (003d RF-7). A commit can only slip through if the lock is lost in the instant between that check and the commit. Accepted as part of 003d's documented overlap.
+- The lock is lost while a reset runs: the reset checks the lock just before committing (RF-4), and the process exits soon after (003d RF-7). A commit can only slip through if the lock is lost between that fresh check and the commit, a window of one database round trip. Accepted as part of 003d's documented overlap.
 
 ## Out of scope
 - The start command and lock (003d), rate limits (003b), seeding and caps (003a).
@@ -218,6 +218,8 @@ Earlier decisions (F series where still applicable, and J1 to J16) still apply u
 - **S10 (3.4) – zero values:** the write wait and the waiting-writes limit now start at 1.
 - **S11 (4.1) – `Retry-After`:** equals the write wait setting instead of a hardcoded 5.
 - **S12 (3.3 of 003a) – seeds created at a reset:** get their immediate first check (RF-5).
+- **S13 (confirmation pass) – lock check before commit:** uses 003d RF-7a, a fresh query rather than the last heartbeat, so the remaining window is one database round trip.
+- **S14 (confirmation pass) – startup sum:** the write drain is zero at startup, which 003d's 5 s margin already covers.
 
 ## Open questions
 - (none)
