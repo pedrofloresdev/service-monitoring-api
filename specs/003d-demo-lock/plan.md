@@ -1,6 +1,6 @@
 # 003d - Demo mode: project start command and single-process lock — technical plan
 
-Status: draft (awaiting approval, including §12)
+Status: approved (2026-11-25, including §12: Dockerfile exec-form CMD and 180 s healthcheck start period; `python -m app.serve` in README, AGENTS.md and the container)
 Spec: `specs/003d-demo-lock/spec.md` (approved 2026-11-24; no open questions)
 Base: branch `feature/003d-demo-lock`, from `master` at `651199a` (003a merged)
 
