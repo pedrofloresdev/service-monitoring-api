@@ -76,7 +76,7 @@ Rules for every task:
 
     All quality checks are green.
 
-- [ ] **T7. The project start command with stand-ins.** Write `tests/test_serve.py` first, then `app/serve.py` (plan §7.1, §7.5): settings errors, `PORT`, the demo-off path, the RF-4 sequence, `run_migrations` (child process, stop handling, lost-lock kill), `serve` (handlers reset, marker, `uvicorn.run`, lock closed), and `server_options` / `demo_server_options`. RF-1, RF-3, RF-4, RF-8
+- [x] **T7. The project start command with stand-ins.** Write `tests/test_serve.py` first, then `app/serve.py` (plan §7.1, §7.5): settings errors, `PORT`, the demo-off path, the RF-4 sequence, `run_migrations` (child process, stop handling, lost-lock kill), `serve` (handlers reset, marker, `uvicorn.run`, lock closed), and `server_options` / `demo_server_options`. RF-1, RF-3, RF-4, RF-8
   - Done when the tests show:
     - the exact step order with recording fakes;
     - each failure stops the later steps with exit 1 and the exact §5 text;
