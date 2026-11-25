@@ -1,6 +1,6 @@
 # 003d - Demo mode: project start command and single-process lock — tasks
 
-Status: draft (awaiting approval)
+Status: approved (2026-11-25)
 Spec: `spec.md` (approved) · Plan: `plan.md` (approved 2026-11-25, including §12 container and start-command changes)
 
 Rules for every task:
