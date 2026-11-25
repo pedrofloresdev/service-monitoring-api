@@ -200,7 +200,6 @@ def _migrate_then_serve(
 
 def _demo(
     database_url: str,
-    port: int,
     stop: threading.Event,
     acquire: Acquire,
     migrate: Migrate,
@@ -210,6 +209,7 @@ def _demo(
     if workers > 1:
         logger.error("Demo mode requires a single process (WEB_CONCURRENCY=%d)", workers)
         return 1
+    port = parse_port(os.environ.get("PORT"))  # after WEB_CONCURRENCY, which comes first
     try:
         _, lock_config = validate_demo_settings()  # every error at once
     except DemoConfigError as exc:
@@ -266,8 +266,8 @@ def main(
             logger.error("%s", _settings_errors(exc))
             return 1
         try:
-            port = parse_port(os.environ.get("PORT"))
             if not settings.demo_mode:  # RF-8: no lock, no WEB_CONCURRENCY rule, any database
+                port = parse_port(os.environ.get("PORT"))
                 return _migrate_then_serve(
                     settings.DATABASE_URL,
                     stop,
@@ -276,7 +276,7 @@ def main(
                     migrate,
                     run_server,
                 )
-            return _demo(settings.DATABASE_URL, port, stop, acquire, migrate, run_server)
+            return _demo(settings.DATABASE_URL, stop, acquire, migrate, run_server)
         except ValueError as exc:  # PORT and WEB_CONCURRENCY carry their own message
             logger.error("%s", exc)
             return 1

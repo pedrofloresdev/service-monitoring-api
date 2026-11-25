@@ -50,6 +50,7 @@ flowchart LR
 
 ## 2. Lifecycle and scheduler sync
 
+- **Process start**: the API is started with `python -m app.serve`, which runs the migrations and then the server (§8).
 - **Startup** (FastAPI `lifespan`): `start_scheduler()` opens its own `SessionLocal()`, loads every active service, adds one interval job per service (`trigger="interval"`, `seconds=check_interval`, `replace_existing=True`), closes the session and starts the `BackgroundScheduler`. The first check of a job runs one interval after it is scheduled (seeded demo services also get an immediate first check, §7).
 - **Shutdown**: `stop_scheduler()` shuts the scheduler down without waiting for running jobs.
 - **CRUD keeps jobs in sync** (`app/api/v1/services.py`):
@@ -176,7 +177,7 @@ Existing services are never changed, deactivated or deleted because of their URL
 
 ## 7. Demo mode (spec 003a)
 
-Demo mode lets the API run as a demo with example services that visitors can look at but not change, plus a small, capped space where visitors can add their own services. It is off by default. **On its own it is not enough for a public deployment:** specs 003b (rate limiting), 003c (periodic reset) and 003d (single-process lock) are needed too.
+Demo mode lets the API run as a demo with example services that visitors can look at but not change, plus a small, capped space where visitors can add their own services. It is off by default. Demo mode runs only under the project start command, which guarantees a single process (spec 003d, §8). **It is not yet enough for a public deployment:** specs 003b (rate limiting) and 003c (periodic reset) are needed too.
 
 ### Settings
 
@@ -246,7 +247,77 @@ The only exception is a race: a cap filled by another request during the hostnam
 - Aliases of one target (another hostname, a CNAME, the IP literal) are different cap hosts, so only the global cap bounds them together. Accepted, because both caps are small.
 - If the owner raises `DEMO_MIN_CHECK_INTERVAL_SECONDS`, existing visitor services keep their interval until they are updated (an update must then meet the new minimum).
 
-## 8. Known trade-offs
+## 8. Single process and start command (spec 003d)
+
+Demo mode keeps state that only works in one process (the reset schedule of 003c and the in-memory rate limits of 003b). So while demo mode is on, exactly one process per database runs it. **Design decision:** one process, enforced by a PostgreSQL lock taken by the start command before the server starts. The alternatives (several processes sharing state, leader election) are out of scope. The lock is taken outside the application because uvicorn only acts on a stop signal after application startup has finished, so a wait inside startup couldn't be stopped.
+
+### The start command: `python -m app.serve`
+
+The container and the docs start the API with this command (`app/serve.py`), in every mode. It reads the settings with the app's own rules (environment, then `.env`), runs the migrations in a child process (`python -m alembic upgrade head`, with the resolved `DATABASE_URL`, so Alembic's logging setup never reaches the server), then runs uvicorn in its own process on `0.0.0.0` and `PORT` (default 8000), without auto-reload.
+
+| Step | Demo mode off | Demo mode on |
+|---|---|---|
+| 1 | load settings and `PORT` | load settings, check `WEB_CONCURRENCY` (unset or empty = 1; must be decimal digits ≥ 1; above 1 refuses), then `PORT` |
+| 2 | — | validate every demo setting (003a and 003d; 003b and 003c add theirs), all errors at once |
+| 3 | — | require PostgreSQL |
+| 4 | — | take the demo lock (below) |
+| 5 | — | start the heartbeat |
+| 6 | migrations (child process) | migrations (child process), only now that the lock is held |
+| 7 | server: `workers` from `WEB_CONCURRENCY` (uvicorn reads it, as before), no reload | reset the stop-signal handlers, set the start marker, server with 1 worker, no reload |
+
+Until step 7, SIGTERM and SIGINT only ask the start command to stop: during the lock wait it exits 0 within about a second without migrating; during the migrations it ends the migration child and exits 0 (PostgreSQL rolls back an unfinished revision). From step 7 the server owns stop signals and acts on them once application startup has finished.
+
+**Start marker:** the start command sets an in-memory flag in `app/core/runtime.py` just before starting the server. With demo mode on, application startup refuses without it, before any demo step: `Demo mode must be started with the project start command (python -m app.serve)`. Auto-reload, extra workers and other start commands (a platform override, `uvicorn app.main:app`) run the app in a process without the flag, so demo mode can't run under them. For development with auto-reload, keep demo mode off: `alembic upgrade head && uvicorn app.main:app --reload`.
+
+**Messages and exit statuses** (all logged by `app.serve`):
+
+| Situation | Message | Exit |
+|---|---|---|
+| Invalid settings | `Invalid settings:` plus one line per error (no values echoed) | 1 |
+| Invalid `PORT` | `PORT: must be a whole number from 1 to 65535` | 1 |
+| Invalid `WEB_CONCURRENCY` (demo on) | `WEB_CONCURRENCY: must be a whole number of at least 1` | 1 |
+| `WEB_CONCURRENCY` above 1 (demo on) | `Demo mode requires a single process (WEB_CONCURRENCY=<n>)` | 1 |
+| Invalid demo settings | `Invalid demo settings:` plus every error | 1 |
+| Not PostgreSQL (demo on) | `Demo mode requires PostgreSQL` | 1 |
+| Wrong credentials, missing database, other permanent error | `Demo mode could not connect to the database: <reason>` (never the password), at once | 1 |
+| Lock still held when the wait ends | `Demo mode requires a single process: another process holds the demo lock` | 1 |
+| Database never reached during the wait | `Demo mode could not reach the database to take the demo lock` | 1 |
+| Migrations failed | `Migrations failed (exit status <n>)` | 1 |
+| Stop signal during the wait or the migrations | `Stop signal received; exiting` | 0 |
+| Lock lost | `Demo lock lost (<reason>); stopping demo jobs and exiting` | 1, immediately |
+
+### The demo lock
+
+- **What:** a session-level PostgreSQL advisory lock (`pg_try_advisory_lock`), held on a dedicated autocommit connection that only the lock uses (not the pool used by requests and checks). PostgreSQL releases it when that connection ends: at once on a clean stop or a crash. No table, no migration.
+- **Identity:** a signed 64-bit key from SHA-256 of the lock name (`DEMO_LOCK_NAME`) and the database name. Staging and production sharing one database must use different lock names, or the second refuses.
+- **Taking it:** one attempt per second until `DEMO_LOCK_WAIT_SECONDS` ends (0 = one attempt). Each connect attempt has a 2-second timeout (libpq's minimum), and a stop signal abandons an attempt in progress. A database that refuses or times out is retried; a permanent error (wrong password, missing database) is refused at once.
+- **Connection settings:** the lock connection uses `DATABASE_URL` and keeps its query parameters; its own options win (`connect_timeout=2`, `application_name=service-monitoring-api-demo-lock`, keepalive settings appended to any `options`).
+- **Dead clients:** the lock connection asks PostgreSQL to probe it (`tcp_keepalives_idle` = K/3, `tcp_keepalives_interval` = K/9, at least 1 s, 3 probes, with K = `DEMO_LOCK_KEEPALIVE_SECONDS`), so the server releases the lock of a client lost to a network failure in under K. Over a Unix socket a network loss can't happen, and a dead process closes the socket.
+- **Heartbeat:** every `DEMO_LOCK_HEARTBEAT_SECONDS`, a query of `pg_locks` on the lock connection confirms it still holds the key. A watchdog abandons the query after `DEMO_LOCK_TIMEOUT_SECONDS`, because a call on a dead network can block regardless of statement timeouts. On the first failure (an error, the timeout, or the lock gone) the process stops the demo jobs (with at most 1 s for them), logs the reason and ends immediately with status 1, without a graceful server shutdown (requests in progress are dropped), within the heartbeat timeout plus 2 seconds of the failed heartbeat's start. A running reset (003c) is rolled back by PostgreSQL. The platform restarts the process, which takes the lock again. A brief network blip therefore costs a restart.
+- **Lock status:** `app.core.runtime.demo_lock_is_held()` runs a fresh query with the heartbeat timeout; anything but a confirmed "held" is false. 003c calls it just before committing a reset.
+
+**Known limit:** after the lock is lost, the old process may keep running for up to the heartbeat interval plus the heartbeat timeout plus 2 seconds (17 s with the defaults). During that window another process can already hold the lock. "Exactly one process" is guaranteed only outside that bounded window.
+
+### Settings (read only while demo mode is on)
+
+| Setting | Default | Valid values |
+|---|---|---|
+| `DEMO_LOCK_WAIT_SECONDS` | `60` | 0–3600 (0 = one attempt) |
+| `DEMO_LOCK_HEARTBEAT_SECONDS` | `10` | 1–300 |
+| `DEMO_LOCK_TIMEOUT_SECONDS` | `5` | 1–60, below the heartbeat interval (the error names both) |
+| `DEMO_LOCK_KEEPALIVE_SECONDS` | `30` | 10–600 |
+| `DEMO_LOCK_NAME` | `service-monitoring-api-demo` | 1–100 ASCII letters, digits, `-` and `_` |
+
+Integers use decimal digits only. `WEB_CONCURRENCY` and `PORT` are the server's variables, read from the process environment only (not from `.env`), as before.
+
+### Deployment
+
+- **PostgreSQL directly.** A transaction-pooling proxy (for example PgBouncer in transaction mode) can't hold a session lock reliably. It is unsupported and not detected.
+- **`WEB_CONCURRENCY` must be 1** in demo mode. Some platforms set it automatically; the start command refuses above 1.
+- **Deploys:** a new process waits up to `DEMO_LOCK_WAIT_SECONDS` for the old one to stop, then refuses. Platforms that wait for the new instance to be healthy before stopping the old one need a stop-first (recreate) strategy. With a restart policy, a refusal at startup becomes a restart loop slowed only by the platform's backoff.
+- **Container:** the image runs `CMD ["python", "-m", "app.serve"]` in exec form, so the start command is PID 1 and receives `docker stop` itself. The healthcheck start period is 180 s: the worst-case startup with default settings is the lock wait (60 s) + migrations (30 s allowance) + seed validation (one resolution timeout, 2 s) + 003c's write drain (5 s) + 003c's reset bound (under 60 s), about 157 s. It is a fixed value; raise it by hand if you raise those settings.
+
+## 9. Known trade-offs
 
 - **Tests run on SQLite** (in memory) with the scheduler mocked; production runs on PostgreSQL. The default suite builds tables from the models, so it cannot see differences between the migration history and the models. That gap is closed by the `migrations` CI job: `python -m tools.schema_check` compares a database built by `alembic upgrade head` with one built from the models, and `pytest -m postgres` exercises the migrations, the metrics/status endpoints and the demo caps and duplicate detection under concurrency on PostgreSQL. Other Postgres-specific behavior in the rest of the suite is still not covered (roadmap spec 006).
 - **Sync SQLAlchemy sessions** in both requests and scheduler threads: simpler than mixing async and threaded code, at the cost of one blocking DB call per operation.

@@ -280,6 +280,21 @@ class TestDemoModeOn:
         assert _errors(caplog) == [message]
         assert harness.steps == []  # before settings validation and any lock attempt
 
+    def test_web_concurrency_comes_before_port(
+        self, harness: Harness, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        _demo_env(monkeypatch, WEB_CONCURRENCY="2", PORT="bad")
+        assert harness.main() == 1
+        assert _errors(caplog) == ["Demo mode requires a single process (WEB_CONCURRENCY=2)"]
+
+    def test_invalid_port_refuses_before_the_lock(
+        self, harness: Harness, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        _demo_env(monkeypatch, PORT="0")
+        assert harness.main() == 1
+        assert _errors(caplog) == ["PORT: must be a whole number from 1 to 65535"]
+        assert harness.steps == []
+
     @pytest.mark.parametrize("raw", ["", "1"])
     def test_web_concurrency_of_one(
         self, harness: Harness, monkeypatch: pytest.MonkeyPatch, raw: str
