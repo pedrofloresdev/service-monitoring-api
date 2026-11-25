@@ -1,6 +1,13 @@
 # Validation - 003d Demo mode: project start command and single-process lock
 
-**Verdict: PENDING CI and `/sdd-validate`.** Local evidence was collected on 2026-11-25 on WSL2 with Python 3.11, Docker, and PostgreSQL 15.19. `/sdd-validate` re-runs everything rather than trusting this file.
+**Verdict: FULFILLED PENDING CI.**
+- `/sdd-validate` (reviewer on Sonnet, 2026-11-25): every RF and RNF is covered by passing tests. The reviewer re-ran all the checks and the real `python -m app.serve` against PostgreSQL. It found no spec violation and no doc mismatch.
+- Five non-blocking findings. Finding 1 is fixed in the commit after `9aed7f7`: the "lock lost" callbacks now run in parallel within the 1 s budget, so a slow "stop demo jobs" can't keep the migration-child kill from running (RF-7). New test: `test_a_hanging_callback_does_not_stop_a_later_one`. Findings 2 to 5 are accepted:
+  - a stop signal in the tiny window just before the server installs its handlers is dropped, and Docker's grace period ends the process;
+  - in demo mode an invalid `PORT` is reported before the demo settings;
+  - a connect attempt abandoned at its timeout may briefly leak a connection that holds no lock;
+  - the automated suite uses a stand-in server, and the real server with the marker was checked by hand.
+- The reviewer also noted that after `docker stop`, the server step may exit 143 (uvicorn re-raises the signal), which the spec allows. As PID 1 the container exits 0. Local evidence was collected on 2026-11-25 on WSL2 with Python 3.11, Docker, and PostgreSQL 15.19. `/sdd-validate` re-runs everything rather than trusting this file.
 
 Branch: `feature/003d-demo-lock`.
 
@@ -58,5 +65,4 @@ Commits:
 
 ## Pending
 
-1. Push and open the PR (owner confirmation); CI green; tick T10.
-2. `/sdd-validate 003d-demo-lock`.
+1. CI green on the PR; tick T10.

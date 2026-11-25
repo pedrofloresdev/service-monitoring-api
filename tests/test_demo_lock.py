@@ -352,6 +352,16 @@ class TestLost:
         lock.lost("x")
         assert exits.codes == [1] and time.monotonic() - started < 1.3
 
+    def test_a_hanging_callback_does_not_stop_a_later_one(self) -> None:
+        # The migration-child kill is registered after "stop demo jobs" (spec 003d RF-7).
+        killed = threading.Event()
+        exits = Exits()
+        lock = _held_lock(FakeConnection(), exits)
+        lock.add_lost_callback(lambda: time.sleep(10))
+        lock.add_lost_callback(killed.set)
+        lock.lost("x")
+        assert killed.is_set() and exits.codes == [1]
+
     def test_removed_callback_is_not_run(self) -> None:
         ran: list[str] = []
         exits = Exits()

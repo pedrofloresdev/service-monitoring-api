@@ -240,18 +240,25 @@ class DemoLock:
     def lost(self, reason: str) -> None:
         """Stop the demo jobs and end the process at once with status 1 (RF-7, R1)."""
         logger.error("Demo lock lost (%s); stopping demo jobs and exiting", reason)
-        callbacks = list(self._callbacks)
 
-        def run_callbacks() -> None:
-            for callback in callbacks:
-                try:
-                    callback()
-                except Exception:
-                    logger.exception("A demo-lock-lost callback failed")
+        def run(callback: Callable[[], None]) -> None:
+            try:
+                callback()
+            except Exception:
+                logger.exception("A demo-lock-lost callback failed")
 
-        worker = threading.Thread(target=run_callbacks, daemon=True, name="demo-lock-lost")
-        worker.start()
-        worker.join(CALLBACK_BUDGET_SECONDS)
+        # Each callback in its own thread, all within one budget, so a slow one (for example
+        # stopping the scheduler) never keeps a later one (killing the migration child) from
+        # running.
+        workers = [
+            threading.Thread(target=run, args=(callback,), daemon=True, name="demo-lock-lost")
+            for callback in self._callbacks
+        ]
+        for worker in workers:
+            worker.start()
+        deadline = time.monotonic() + CALLBACK_BUDGET_SECONDS
+        for worker in workers:
+            worker.join(max(0.0, deadline - time.monotonic()))
         for handler in logging.getLogger().handlers:
             handler.flush()
         self._exit(1)
