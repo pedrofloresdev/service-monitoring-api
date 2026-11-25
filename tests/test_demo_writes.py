@@ -356,3 +356,272 @@ class TestDeleteOrder:
 
     def test_404_before_403(self, client: TestClient, demo_config: DemoConfig) -> None:
         assert client.delete(f"{BASE}/9999").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# RF-14 with demo mode on: duplicates on update and legacy stored forms
+# ---------------------------------------------------------------------------
+
+
+class TestDemoDuplicates:
+    @pytest.mark.parametrize("target_origin", ["seeded", "visitor", "ordinary"])
+    def test_update_onto_another_services_url(
+        self,
+        client: TestClient,
+        db_session: Session,
+        demo_config: DemoConfig,
+        schedule_spy: Any,
+        target_origin: str,
+    ) -> None:
+        _store(db_session, "https://taken.example/", origin=target_origin)
+        mine = _store(db_session, "https://mine.example/")
+        resp = client.patch(f"{BASE}/{mine.id}", json={"url": "https://taken.example/"})
+        assert resp.status_code == 409 and resp.json() == DUPLICATE_MSG
+        db_session.refresh(mine)
+        assert mine.url == "https://mine.example/"
+        schedule, unschedule = schedule_spy
+        schedule.assert_not_called()
+        unschedule.assert_not_called()
+
+    def test_create_matching_a_legacy_stored_form(
+        self, client: TestClient, db_session: Session, demo_config: DemoConfig
+    ) -> None:
+        _store(db_session, "http://Example.com", origin="ordinary")  # stored outside the API
+        resp = client.post(BASE, json=_body("http://example.com/"))
+        assert resp.status_code == 409 and resp.json() == DUPLICATE_MSG
+        assert db_session.query(Service).count() == 1
+
+    def test_update_matching_a_legacy_stored_form(
+        self, client: TestClient, db_session: Session, demo_config: DemoConfig
+    ) -> None:
+        _store(db_session, "http://Example.com", origin="ordinary")
+        mine = _store(db_session, "https://mine.example/")
+        resp = client.patch(f"{BASE}/{mine.id}", json={"url": "http://example.com/"})
+        assert resp.status_code == 409 and resp.json() == DUPLICATE_MSG
+
+
+# ---------------------------------------------------------------------------
+# RF-15: per-host cap boundary, lowered cap and cap-host forms through the API
+# ---------------------------------------------------------------------------
+
+
+class TestPerHostCap:
+    def test_per_host_cap_boundary(
+        self, client: TestClient, db_session: Session, demo_config: DemoConfig
+    ) -> None:
+        _store(db_session, "https://h.example/a")
+        assert client.post(BASE, json=_body("https://h.example/b")).status_code == 201
+        resp = client.post(BASE, json=_body("https://h.example/c"))
+        assert resp.status_code == 409 and resp.json() == _host_msg("h.example")
+
+    def test_lowered_per_host_cap_keeps_existing_and_rejects_more(
+        self, client: TestClient, db_session: Session, demo_config: DemoConfig
+    ) -> None:
+        for path in ("a", "b", "c"):  # 3 already stored, above the cap of 2
+            _store(db_session, f"https://h.example/{path}")
+        assert client.post(BASE, json=_body("https://h.example/d")).json() == _host_msg("h.example")
+        other = _store(db_session, "https://other.example/")  # global cap is not checked on update
+        resp = client.patch(f"{BASE}/{other.id}", json={"url": "https://h.example/e"})
+        assert resp.json() == _host_msg("h.example")
+        assert db_session.query(Service).count() == 4  # the services above the cap stay
+
+    @pytest.mark.parametrize(
+        ("stored", "submitted", "host"),
+        [
+            (
+                ("http://[2606:4700::1111]/a", "http://[2606:4700::1111]/b"),
+                "http://[2606:4700:0::1111]:8080/c",
+                "2606:4700::1111",
+            ),
+            (
+                ("https://bücher.example/a", "https://xn--bcher-kva.example/b"),
+                "https://BÜCHER.example./c",
+                "xn--bcher-kva.example",
+            ),
+        ],
+        ids=["ipv6", "punycode"],
+    )
+    def test_cap_host_forms(
+        self,
+        client: TestClient,
+        db_session: Session,
+        demo_config: DemoConfig,
+        stored: tuple[str, str],
+        submitted: str,
+        host: str,
+    ) -> None:
+        for url in stored:
+            _store(db_session, url)
+        resp = client.post(BASE, json=_body(submitted))
+        assert resp.status_code == 409 and resp.json() == _host_msg(host)
+
+
+# ---------------------------------------------------------------------------
+# RF-16: a rejection changes neither the services nor any schedule
+# ---------------------------------------------------------------------------
+
+
+def _fill_global(db: Session) -> None:
+    for i in range(4):
+        _store(db, f"https://g{i}.example/")
+
+
+def _fill_host(db: Session) -> None:
+    _store(db, "https://h.example/a")
+    _store(db, "https://h.example/b")
+
+
+CREATE_REJECTIONS: list[tuple[str, Any, dict[str, Any], int]] = [
+    ("interval", lambda db, r: None, _body("https://x.example/", check_interval=60), 422),
+    ("global-cap", lambda db, r: _fill_global(db), _body("https://x.example/"), 409),
+    ("per-host-cap", lambda db, r: _fill_host(db), _body("https://h.example/c"), 409),
+    (
+        "hostname",
+        lambda db, r: r.set("private.example", "10.0.0.5"),
+        _body("https://private.example/"),
+        422,
+    ),
+    (
+        "duplicate",
+        lambda db, r: _store(db, "https://dup.example/"),
+        _body("https://dup.example/"),
+        409,
+    ),
+]
+
+
+class TestRejectionsChangeNothing:
+    @pytest.mark.parametrize(
+        ("setup", "body", "status"),
+        [case[1:] for case in CREATE_REJECTIONS],
+        ids=[case[0] for case in CREATE_REJECTIONS],
+    )
+    def test_rejected_create(
+        self,
+        client: TestClient,
+        db_session: Session,
+        demo_config: DemoConfig,
+        fake_resolver: FakeResolver,
+        schedule_spy: Any,
+        setup: Any,
+        body: dict[str, Any],
+        status: int,
+    ) -> None:
+        setup(db_session, fake_resolver)
+        before = db_session.query(Service).count()
+        assert client.post(BASE, json=body).status_code == status
+        assert db_session.query(Service).count() == before
+        schedule, unschedule = schedule_spy
+        schedule.assert_not_called()
+        unschedule.assert_not_called()
+
+    @pytest.mark.parametrize("reason", ["per-host-cap", "hostname"])
+    def test_rejected_update(
+        self,
+        client: TestClient,
+        db_session: Session,
+        demo_config: DemoConfig,
+        fake_resolver: FakeResolver,
+        schedule_spy: Any,
+        reason: str,
+    ) -> None:
+        if reason == "per-host-cap":
+            _fill_host(db_session)
+            target = "https://h.example/c"
+        else:
+            fake_resolver.set("private.example", "10.0.0.5")
+            target = "https://private.example/"
+        mine = _store(db_session, "https://mine.example/", interval=600)
+        resp = client.patch(f"{BASE}/{mine.id}", json={"url": target, "check_interval": 900})
+        assert resp.status_code == (409 if reason == "per-host-cap" else 422)
+        db_session.refresh(mine)
+        assert (mine.url, mine.check_interval) == ("https://mine.example/", 600)
+        schedule, unschedule = schedule_spy
+        schedule.assert_not_called()
+        unschedule.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# RF-15: the atomic step has no network lookup, and re-checks the caps
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def events(monkeypatch: pytest.MonkeyPatch, fake_resolver: FakeResolver) -> list[str]:
+    """Records DNS lookups and entering/leaving the cap step, in order."""
+    from contextlib import contextmanager
+
+    from app.services import service_writes, url_safety
+
+    log: list[str] = []
+    real_guard = service_writes.cap_guard
+
+    @contextmanager
+    def guard(db: Session, active: bool) -> Any:
+        with real_guard(db, active):
+            log.append("lock")
+            yield
+            log.append("unlock")
+
+    def resolve(host: str, timeout: float, getaddrinfo: Any = None) -> Any:
+        log.append("dns")
+        return fake_resolver(host, timeout)
+
+    monkeypatch.setattr(service_writes, "cap_guard", guard)
+    monkeypatch.setattr(url_safety, "resolve_host", resolve)
+    return log
+
+
+class TestAtomicCapStep:
+    def test_create_resolves_before_the_cap_step(
+        self, client: TestClient, demo_config: DemoConfig, events: list[str]
+    ) -> None:
+        assert client.post(BASE, json=_body("https://x.example/")).status_code == 201
+        assert events == ["dns", "lock", "unlock"]
+
+    def test_host_changing_update_resolves_before_the_cap_step(
+        self,
+        client: TestClient,
+        db_session: Session,
+        demo_config: DemoConfig,
+        events: list[str],
+    ) -> None:
+        mine = _store(db_session, "https://mine.example/")
+        resp = client.patch(f"{BASE}/{mine.id}", json={"url": "https://elsewhere.example/"})
+        assert resp.status_code == 200
+        assert events == ["dns", "lock", "unlock"]
+
+    @pytest.mark.parametrize("cap", ["global", "per-host"])
+    def test_cap_filled_during_the_lookup_gives_the_cap_409(
+        self,
+        client: TestClient,
+        db_session: Session,
+        demo_config: DemoConfig,
+        monkeypatch: pytest.MonkeyPatch,
+        fake_resolver: FakeResolver,
+        cap: str,
+    ) -> None:
+        from app.services import url_safety
+
+        if cap == "global":
+            for i in range(3):
+                _store(db_session, f"https://g{i}.example/")
+            racer, submitted, expected = "https://racer.example/", "https://x.example/", GLOBAL_MSG
+        else:
+            _store(db_session, "https://h.example/a")
+            racer, submitted, expected = (
+                "https://h.example/racer",
+                "https://h.example/c",
+                _host_msg("h.example"),
+            )
+
+        def resolve_while_another_request_commits(
+            host: str, timeout: float, gai: Any = None
+        ) -> Any:
+            _store(db_session, racer)  # fills the cap after the first check passed
+            return fake_resolver(host, timeout)
+
+        monkeypatch.setattr(url_safety, "resolve_host", resolve_while_another_request_commits)
+        resp = client.post(BASE, json=_body(submitted))
+        assert resp.status_code == 409 and resp.json() == expected
+        assert db_session.query(Service).filter(Service.url == submitted).count() == 0

@@ -1,6 +1,17 @@
 # Validation - 003a Demo mode
 
-**Verdict: PENDING `/sdd-validate`.** CI: PR #8 run 45541629499 on `286d08a`, all 5 checks pass (lint, format, typecheck, test, migrations). All local evidence, including PostgreSQL and the compose run, collected 2026-11-24 (Docker 29.2.1 / Compose v2.40.3).
+**Verdict: PENDING `/sdd-validate`.**
+- First `/sdd-validate` (reviewer on Sonnet, 2026-11-24): NOT FULFILLED on test and doc gaps only, with no failing test or behaviour bug. The gaps:
+  1. demo-on duplicates on update and legacy stored forms;
+  2. the lowered per-host cap, the per-host boundary, and IPv6/punycode cap hosts through the API;
+  3. "schedule unchanged" on create rejections and on the cap/hostname update rejections;
+  4. no DNS in the atomic step, and the cap filled during the lookup;
+  5. architecture §7 missing punycode, aliases, the raised minimum and trailing-dot variants.
+- Fixes (this commit):
+  - 20 new tests in `tests/test_demo_writes.py` (`TestDemoDuplicates`, `TestPerHostCap`, `TestRejectionsChangeNothing`, `TestAtomicCapStep`), mutation-checked: removing the cap re-check fails the 2 race tests, moving the DNS lookup inside the cap step fails the order test;
+  - `tests/test_openapi_snapshot.py`, which compares against a snapshot generated from `master` (the optional finding on the plan's promised snapshot);
+  - doc sentences in architecture §7.
+- Gates after the fixes: 526 passed, coverage 97.20%, 20 postgres tests passed, ruff, format and mypy clean. CI: PR #8 run 45541629499 on `286d08a`, all 5 checks pass (lint, format, typecheck, test, migrations). All local evidence, including PostgreSQL and the compose run, collected 2026-11-24 (Docker 29.2.1 / Compose v2.40.3).
 
 Branch `feature/003-demo-mode`, local evidence collected 2026-11-24 on WSL2, Python 3.11. `/sdd-validate` re-runs everything rather than trusting this file.
 
@@ -36,4 +47,4 @@ Commits: T1 `e9dee13`, T2 `3b93772`, T3 `29010fa`, T4 `080ecd8`, T5 `52b18f2`, T
 
 ## Pending
 
-1. `/sdd-validate 003a-demo-mode`.
+1. Re-run `/sdd-validate 003a-demo-mode`.

@@ -220,7 +220,7 @@ Seeded services get no generated, backfilled or altered metrics; their history c
 
 - **Create**: the new service has origin `visitor`. Without `check_interval` it gets the demo minimum (default 300) instead of 60.
 - **Minimum interval**: a `check_interval` below the demo minimum on create, or on an update of a visitor service (even if equal to the current value), gives `422` with one entry: `{"type": "demo_interval_too_low", "loc": ["body", "check_interval"], "msg": "In demo mode the check interval must be at least 300 seconds", "input": <value>}`. A value outside 10–86400 fails request validation first.
-- **Caps** (`409`): a create when visitor services are at the global cap: `Demo limit reached: at most <G> visitor services at a time.` A create, or an update that changes a visitor service's cap host, when the other visitor services on that host are at the per-host cap: `Demo limit reached: at most <H> visitor services for host <host>.` The **cap host** is the URL's host, lower-cased, without brackets, port or trailing dot (`http://example.com/` and `https://EXAMPLE.com.:8443/x` share one). Seeded and ordinary services don't count. If the owner lowers a cap, services already above it stay.
+- **Caps** (`409`): a create when visitor services are at the global cap: `Demo limit reached: at most <G> visitor services at a time.` A create, or an update that changes a visitor service's cap host, when the other visitor services on that host are at the per-host cap: `Demo limit reached: at most <H> visitor services for host <host>.` The **cap host** is the URL's host in its normalized form (lower-cased, internationalized names in punycode such as `xn--bcher-kva.example`), without brackets, port or trailing dot (`http://example.com/` and `https://EXAMPLE.com.:8443/x` share one). Seeded and ordinary services don't count. If the owner lowers a cap, services already above it stay.
 - **Atomic caps**: caps are checked before the hostname lookup and checked again in the transaction that stores the change, serialized with a PostgreSQL transaction-level advisory lock (`pg_advisory_xact_lock`), with no network lookup inside it. No concurrency of requests, even across several processes, adds a visitor service beyond a cap.
 
 **Error order** (the first that applies wins; a rejected request changes nothing, schedule included):
@@ -242,6 +242,9 @@ The only exception is a race: a cap filled by another request during the hostnam
 - A visitor service on a seeded service's URL: 409 duplicate. On a seeded service's host: allowed up to the per-host cap.
 - A transient DNS answer making a seed resolve to a non-public address stops startup; restart once DNS is correct.
 - Restarts never duplicate seeds or reset their history, and each restart gives seeds an immediate check.
+- `http://example.com/` and `http://example.com./` are different normalized URLs, so both may exist; they share one cap host, so the per-host cap limits them together.
+- Aliases of one target (another hostname, a CNAME, the IP literal) are different cap hosts, so only the global cap bounds them together. Accepted, because both caps are small.
+- If the owner raises `DEMO_MIN_CHECK_INTERVAL_SECONDS`, existing visitor services keep their interval until they are updated (an update must then meet the new minimum).
 
 ## 8. Known trade-offs
 
