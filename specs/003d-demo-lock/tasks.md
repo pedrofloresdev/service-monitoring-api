@@ -104,7 +104,7 @@ Rules for every task:
 
     The default suite and the quality checks are green.
 
-- [ ] **T9. Container change.** Change the `Dockerfile` to an exec-form `CMD ["python", "-m", "app.serve"]` and `--start-period=180s`, with a comment giving the RF-9 sum. Add `tests/test_container.py`. RF-9, RNF-1, RNF-5
+- [x] **T9. Container change.** Change the `Dockerfile` to an exec-form `CMD ["python", "-m", "app.serve"]` and `--start-period=180s`, with a comment giving the RF-9 sum. Add `tests/test_container.py`. RF-9, RNF-1, RNF-5
   - Done when the static test passes and a manual `docker compose up --build` shows:
     - with demo mode off: migrations run, the server answers `/health` and `/api/v1/status`, and `docker stop` ends it promptly;
     - with demo mode on (a throwaway database through a scratch override): the lock is acquired, seeds are checked, a second container against the same database waits and then refuses, and `docker stop` during its wait ends it within about a second.
