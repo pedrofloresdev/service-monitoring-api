@@ -43,7 +43,7 @@ Rules for every task:
     - The `.env.example` keys equal the variables the settings read.
     - All existing tests pass unchanged, and all quality checks are green.
 
-- [ ] **T4. Service origin column and migration.** Add `ServiceOrigin` and the `origin` column (`VARCHAR(8)`, NOT NULL, server default `'ordinary'`, CHECK `ck_services_origin`) to the model. Create the Alembic revision with `alembic revision` and write its upgrade and downgrade by hand. RNF-2
+- [x] **T4. Service origin column and migration.** Add `ServiceOrigin` and the `origin` column (`VARCHAR(8)`, NOT NULL, server default `'ordinary'`, CHECK `ck_services_origin`) to the model. Create the Alembic revision with `alembic revision` and write its upgrade and downgrade by hand. RNF-2
   - Done when:
     - `python -m tools.schema_check` reports no differences.
     - A new `postgres` test shows that migrating a database with existing services sets them all to `ordinary`, and that the downgrade removes the column.
@@ -97,7 +97,7 @@ Rules for every task:
 
     All quality checks are green.
 
-- [ ] **T9. PostgreSQL concurrency tests.** Write `tests/postgres/test_demo_concurrency.py`, with threads against real PostgreSQL. RNF-3
+- [x] **T9. PostgreSQL concurrency tests.** Write `tests/postgres/test_demo_concurrency.py`, with threads against real PostgreSQL. RNF-3
   - Done when, with local PG, the tests show:
     - concurrent creates at each cap boundary never exceed the cap;
     - concurrent host-changing updates never exceed the per-host cap;

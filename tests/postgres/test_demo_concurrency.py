@@ -5,7 +5,9 @@ them at once so they race through the checks and the commit.
 """
 
 import threading
+import time
 from collections.abc import Callable, Iterator
+from typing import Any
 
 import pytest
 from sqlalchemy import create_engine
@@ -21,6 +23,11 @@ from tests.postgres.conftest import AlembicRunner
 pytestmark = pytest.mark.postgres
 
 THREADS = 8
+# Delay after each cap and duplicate check, so every thread passes its checks before any
+# commits: without the lock the caps would be exceeded, and without the commit-time
+# duplicate handling the races would be errors instead of 409. With the lock, the cap
+# re-checks run one at a time.
+CHECK_DELAY_SECONDS = 0.2
 Outcome = str  # "ok", or the name of the domain exception raised
 
 
@@ -36,6 +43,19 @@ def factory(
         yield sessionmaker(bind=engine)
     finally:
         engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def slow_checks(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("_check_global_cap", "_check_host_cap", "duplicate_exists"):
+        real = getattr(service_writes, name)
+
+        def slowed(*args: Any, _real: Any = real, **kwargs: Any) -> Any:
+            result = _real(*args, **kwargs)
+            time.sleep(CHECK_DELAY_SECONDS)
+            return result
+
+        monkeypatch.setattr(service_writes, name, slowed)
 
 
 def _insert(factory: sessionmaker[Session], *urls: str, origin: str = "visitor") -> list[int]:
