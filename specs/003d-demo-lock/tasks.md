@@ -67,7 +67,7 @@ Rules for every task:
 
     All quality checks are green.
 
-- [ ] **T6. Heartbeat, watchdog, hard exit and `is_held`.** Add `start_heartbeat`, the bounded query, `lost`, the callbacks, `is_held` and `close` to `DemoLock` (plan §7.3, §7.4), with an injected exit function. Tests first in `tests/test_demo_lock.py`. RF-7, RF-7a
+- [x] **T6. Heartbeat, watchdog, hard exit and `is_held`.** Add `start_heartbeat`, the bounded query, `lost`, the callbacks, `is_held` and `close` to `DemoLock` (plan §7.3, §7.4), with an injected exit function. Tests first in `tests/test_demo_lock.py`. RF-7, RF-7a
   - Done when the tests show, with a 1 s timeout:
     - a failed, timed-out or not-held heartbeat runs the callbacks and calls exit with 1 within timeout + 2 s;
     - a hanging callback doesn't push the exit past the budget;

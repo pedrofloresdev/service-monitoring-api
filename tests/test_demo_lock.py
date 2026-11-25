@@ -4,6 +4,7 @@ Time-based behaviour uses an injected clock and sleep, or a 1-second timeout, ne
 default settings.
 """
 
+import logging
 import threading
 import time
 from dataclasses import dataclass, field
@@ -15,7 +16,7 @@ import pytest
 from app.core.demo_settings import LockConfig
 from app.services import demo_lock
 from app.services.demo_lock import DemoLock, LockRefused
-from app.services.demo_lock_rules import connect_kwargs, lock_key
+from app.services.demo_lock_rules import connect_kwargs, lock_key, split_key
 
 URL = "postgresql://demo:s3cret@db:5432/app"
 KEY = lock_key("demo", "app")
@@ -234,3 +235,172 @@ class TestAcquire:
             _config(wait=60), URL, stop=stop, connect=Connector(conn), sleep=sleep
         )
         assert result is None and conn.closed
+
+
+# ---------------------------------------------------------------------------
+# RF-7, RF-7a: holding the lock
+# ---------------------------------------------------------------------------
+
+
+class Exits:
+    """Records the exit status and when it happened, instead of ending the test run."""
+
+    def __init__(self) -> None:
+        self.codes: list[int] = []
+        self.at: list[float] = []
+        self.done = threading.Event()
+
+    def __call__(self, code: int) -> None:
+        self.codes.append(code)
+        self.at.append(time.monotonic())
+        self.done.set()
+
+
+def _held_lock(conn: FakeConnection, exits: Exits, heartbeat: int = 1) -> DemoLock:
+    return DemoLock(conn, KEY, _config(heartbeat=heartbeat, timeout=1), exit_fn=exits)
+
+
+class TestCheck:
+    def test_held(self) -> None:
+        conn = FakeConnection(held=True)
+        assert _held_lock(conn, Exits()).check() == (True, "")
+        classid, objid = split_key(KEY)
+        assert conn.queries == [(demo_lock.HELD_SQL, {"classid": classid, "objid": objid})]
+
+    def test_not_held(self) -> None:
+        conn = FakeConnection(held=False)
+        assert _held_lock(conn, Exits()).check() == (False, "lock no longer held")
+
+    def test_error(self) -> None:
+        conn = FakeConnection(held=psycopg2.OperationalError("server closed the connection"))
+        assert _held_lock(conn, Exits()).check() == (False, "heartbeat failed: OperationalError")
+
+    def test_hang_is_abandoned_at_the_timeout(self) -> None:
+        conn = FakeConnection(held="hang")
+        started = time.monotonic()
+        assert _held_lock(conn, Exits()).check() == (False, "heartbeat timed out after 1 s")
+        assert time.monotonic() - started < 1.3
+        conn.release_hang.set()
+
+    def test_a_check_waiting_behind_a_hung_query_also_times_out(self) -> None:
+        conn = FakeConnection(held="hang")
+        lock = _held_lock(conn, Exits())
+        lock.check()
+        started = time.monotonic()
+        assert lock.check() == (False, "heartbeat timed out after 1 s")
+        assert time.monotonic() - started < 1.3
+        conn.release_hang.set()
+
+
+class TestIsHeld:
+    @pytest.mark.parametrize(
+        ("held", "expected"),
+        [(True, True), (False, False), (psycopg2.OperationalError("x"), False), ("hang", False)],
+    )
+    def test_fresh_check_never_exits(self, held: Any, expected: bool) -> None:
+        conn = FakeConnection(held=held)
+        exits = Exits()
+        lock = _held_lock(conn, exits)
+        assert lock.is_held() is expected
+        assert exits.codes == []
+        conn.release_hang.set()
+
+
+class TestLost:
+    def test_callbacks_run_then_exit_1_after_flushing_logs(self) -> None:
+        events: list[str] = []
+
+        class Recorder(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                events.append("log")
+
+            def flush(self) -> None:
+                events.append("flush")
+
+        def exit_fn(code: int) -> None:
+            events.append(f"exit {code}")
+
+        lock = DemoLock(FakeConnection(), KEY, _config(), exit_fn=exit_fn)
+        lock.add_lost_callback(lambda: events.append("stop demo jobs"))
+        root = logging.getLogger()
+        handler = Recorder()
+        root.addHandler(handler)
+        try:
+            lock.lost("lock no longer held")
+        finally:
+            root.removeHandler(handler)
+        assert events.index("stop demo jobs") < events.index("flush") < events.index("exit 1")
+
+    def test_a_failing_callback_does_not_stop_the_others(self) -> None:
+        ran: list[str] = []
+        exits = Exits()
+        lock = _held_lock(FakeConnection(), exits)
+
+        def failing() -> None:
+            raise RuntimeError("boom")
+
+        lock.add_lost_callback(failing)
+        lock.add_lost_callback(lambda: ran.append("second"))
+        lock.lost("x")
+        assert ran == ["second"] and exits.codes == [1]
+
+    def test_a_hanging_callback_does_not_delay_the_exit_past_the_budget(self) -> None:
+        exits = Exits()
+        lock = _held_lock(FakeConnection(), exits)
+        lock.add_lost_callback(lambda: time.sleep(10))
+        started = time.monotonic()
+        lock.lost("x")
+        assert exits.codes == [1] and time.monotonic() - started < 1.3
+
+    def test_removed_callback_is_not_run(self) -> None:
+        ran: list[str] = []
+        exits = Exits()
+        lock = _held_lock(FakeConnection(), exits)
+
+        def callback() -> None:
+            ran.append("x")
+
+        lock.add_lost_callback(callback)
+        lock.remove_lost_callback(callback)
+        lock.remove_lost_callback(callback)  # removing twice is harmless
+        lock.lost("x")
+        assert ran == []
+
+
+class TestHeartbeat:
+    @pytest.mark.parametrize("held", [False, psycopg2.OperationalError("gone"), "hang"])
+    def test_first_failure_exits_1_within_timeout_plus_2_seconds(self, held: Any) -> None:
+        conn = FakeConnection(held=held)
+        exits = Exits()
+        stopped: list[bool] = []
+        lock = _held_lock(conn, exits)
+        lock.add_lost_callback(lambda: stopped.append(True))
+        lock.start_heartbeat()
+        assert exits.done.wait(5)
+        conn.release_hang.set()
+        assert exits.codes == [1] and stopped == [True]
+        failed_heartbeat_started = conn.query_started[0]
+        assert exits.at[0] - failed_heartbeat_started < 1 + 2  # timeout + 2 s (RF-7)
+
+    def test_healthy_heartbeat_keeps_running(self) -> None:
+        conn = FakeConnection(held=True)
+        exits = Exits()
+        lock = _held_lock(conn, exits)
+        lock.start_heartbeat()
+        time.sleep(2.3)
+        lock.close()
+        assert len(conn.queries) >= 2 and exits.codes == [] and conn.closed
+
+    def test_close_stops_the_heartbeat(self) -> None:
+        conn = FakeConnection(held=False)
+        exits = Exits()
+        lock = _held_lock(conn, exits)
+        lock.start_heartbeat()
+        lock.close()
+        time.sleep(1.3)
+        assert exits.codes == [] and conn.queries == []
+
+    def test_close_tolerates_a_broken_connection(self) -> None:
+        conn = FakeConnection()
+        conn.close = lambda: (_ for _ in ()).throw(psycopg2.InterfaceError("closed"))  # type: ignore[method-assign]
+        _held_lock(conn, Exits()).close()

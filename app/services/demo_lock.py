@@ -188,3 +188,75 @@ class DemoLock:
             if (pause > 0 and sleep(pause, stop)) or stop.is_set():
                 _close(conn)
                 return None
+
+    # -- holding the lock (RF-7, RF-7a) ---------------------------------------------------
+
+    def check(self) -> tuple[bool, str]:
+        """Is the key still held by this connection? Bounded by the heartbeat timeout."""
+        timeout = self._config.timeout
+        started = time.monotonic()
+        timed_out = f"heartbeat timed out after {timeout} s"
+        if not self._conn_lock.acquire(timeout=timeout):
+            return False, timed_out
+        params = {"classid": self._classid, "objid": self._objid}
+
+        def query() -> Any:
+            try:
+                return _query_one(self._conn, HELD_SQL, params)
+            finally:
+                self._conn_lock.release()  # a hung query keeps it: the connection is unusable
+
+        status, value = _bounded(query, max(0.0, timeout - (time.monotonic() - started)))
+        if status == "timeout":
+            return False, timed_out
+        if status == "error":
+            return False, f"heartbeat failed: {type(value).__name__}"
+        if value is not True:
+            return False, "lock no longer held"
+        return True, ""
+
+    def is_held(self) -> bool:
+        """A fresh check for other parts of the app (RF-7a); errors count as not held."""
+        held, _ = self.check()
+        return held
+
+    def add_lost_callback(self, callback: Callable[[], None]) -> None:
+        self._callbacks.append(callback)
+
+    def remove_lost_callback(self, callback: Callable[[], None]) -> None:
+        if callback in self._callbacks:
+            self._callbacks.remove(callback)
+
+    def start_heartbeat(self) -> None:
+        threading.Thread(target=self._heartbeat, daemon=True, name="demo-lock-heartbeat").start()
+
+    def _heartbeat(self) -> None:
+        while not self._heartbeat_stop.wait(self._config.heartbeat):
+            held, reason = self.check()
+            if not held and not self._heartbeat_stop.is_set():
+                self.lost(reason)
+                return
+
+    def lost(self, reason: str) -> None:
+        """Stop the demo jobs and end the process at once with status 1 (RF-7, R1)."""
+        logger.error("Demo lock lost (%s); stopping demo jobs and exiting", reason)
+        callbacks = list(self._callbacks)
+
+        def run_callbacks() -> None:
+            for callback in callbacks:
+                try:
+                    callback()
+                except Exception:
+                    logger.exception("A demo-lock-lost callback failed")
+
+        worker = threading.Thread(target=run_callbacks, daemon=True, name="demo-lock-lost")
+        worker.start()
+        worker.join(CALLBACK_BUDGET_SECONDS)
+        for handler in logging.getLogger().handlers:
+            handler.flush()
+        self._exit(1)
+
+    def close(self) -> None:
+        """Stop the heartbeat and close the lock connection, which releases the lock."""
+        self._heartbeat_stop.set()
+        _close(self._conn)
