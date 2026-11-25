@@ -105,7 +105,7 @@ Rules for every task:
 
     `pytest -m postgres --no-cov` passes, and the default suite and the quality checks are green.
 
-- [ ] **T10. Docs and validation.** Make these changes:
+- [x] **T10. Docs and validation.** Make these changes:
   - `docs/architecture.md`: a new §7 "Demo mode".
   - `docs/SPEC.md`: a current-scope line linking to §7.
   - `README.md`: a "Running a public demo" section.

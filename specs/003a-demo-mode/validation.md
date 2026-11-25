@@ -1,6 +1,6 @@
 # Validation - 003a Demo mode
 
-**Verdict: PENDING CI and `/sdd-validate`.** All local evidence, including PostgreSQL and the compose run, collected 2026-11-24 (Docker 29.2.1 / Compose v2.40.3).
+**Verdict: PENDING `/sdd-validate`.** CI: PR #8 run 45541629499 on `286d08a`, all 5 checks pass (lint, format, typecheck, test, migrations). All local evidence, including PostgreSQL and the compose run, collected 2026-11-24 (Docker 29.2.1 / Compose v2.40.3).
 
 Branch `feature/003-demo-mode`, local evidence collected 2026-11-24 on WSL2, Python 3.11. `/sdd-validate` re-runs everything rather than trusting this file.
 
@@ -36,5 +36,4 @@ Commits: T1 `e9dee13`, T2 `3b93772`, T3 `29010fa`, T4 `080ecd8`, T5 `52b18f2`, T
 
 ## Pending
 
-1. Push and open the PR (owner confirmation), CI green; then tick T10.
-2. `/sdd-validate 003a-demo-mode`.
+1. `/sdd-validate 003a-demo-mode`.
