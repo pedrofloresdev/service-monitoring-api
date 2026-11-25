@@ -28,8 +28,9 @@ files = ["app", "tests", "tools"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-# APScheduler 3.x ships no type information.
-module = ["apscheduler.*"]
+# APScheduler 3.x and psycopg2 ship no type information (psycopg2 is used directly only
+# by the demo lock, spec 003d; adding stubs would be a new dependency).
+module = ["apscheduler.*", "psycopg2.*"]
 ignore_missing_imports = true
 
 [tool.coverage.run]

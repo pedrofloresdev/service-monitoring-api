@@ -55,7 +55,7 @@ Rules for every task:
 
     All quality checks are green.
 
-- [ ] **T5. Taking the lock with fakes.** Write `tests/test_demo_lock.py` first, then `DemoLock.acquire` and `LockRefused` in `app/services/demo_lock.py` (plan §7.2), with an injected connector, clock and sleep. Connect attempts and queries run in daemon threads. RF-5, RF-6 (connection options), RNF-3
+- [x] **T5. Taking the lock with fakes.** Write `tests/test_demo_lock.py` first, then `DemoLock.acquire` and `LockRefused` in `app/services/demo_lock.py` (plan §7.2), with an injected connector, clock and sleep. Connect attempts and queries run in daemon threads. RF-5, RF-6 (connection options), RNF-3
   - Done when the tests show:
     - a held lock retried every 1 s until the wait ends;
     - wait 0 is exactly one attempt;
