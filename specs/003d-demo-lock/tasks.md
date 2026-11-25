@@ -37,7 +37,7 @@ Rules for every task:
     - The password is removed (raw and percent-encoded).
     - All quality checks are green.
 
-- [ ] **T3. Lock settings and combined validation.** Add the five `DEMO_LOCK_*` fields, `LockConfig`, `load_lock_config` and `validate_demo_settings` to `app/core/demo_settings.py` (plan §4.1), and the commented settings to `.env.example`. Tests first in `tests/test_demo_settings.py`. Settings, RF-4 step 2
+- [x] **T3. Lock settings and combined validation.** Add the five `DEMO_LOCK_*` fields, `LockConfig`, `load_lock_config` and `validate_demo_settings` to `app/core/demo_settings.py` (plan §4.1), and the commented settings to `.env.example`. Tests first in `tests/test_demo_settings.py`. Settings, RF-4 step 2
   - Done when:
     - Tests cover the defaults (60, 10, 5, 30, `service-monitoring-api-demo`), each range, strict integers and the lock-name rule.
     - The timeout-below-interval rule names both variables.
