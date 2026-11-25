@@ -23,7 +23,7 @@ REST API that registers HTTP services, checks them on a per-service schedule, st
 
 ## Commands
 - Setup: `pip install -r requirements-dev.txt` (Python 3.11)
-- Run: `alembic upgrade head && uvicorn app.main:app --reload` (or `docker compose up --build`)
+- Run: `python -m app.serve` (migrations, then the server; or `docker compose up --build`). Development with auto-reload, demo mode off only: `alembic upgrade head && uvicorn app.main:app --reload`
 - Build: `docker compose build`
 - Test: `pytest` (fails below the coverage floor set in `pyproject.toml`)
 - Lint: `ruff check .`

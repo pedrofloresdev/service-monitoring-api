@@ -185,7 +185,7 @@ cp .env.example .env       # review and adjust if needed
 docker compose up --build
 ```
 
-Migrations run automatically. API is available at `http://localhost:8000`.
+The container runs `python -m app.serve`, which applies the migrations and then starts the server. API is available at `http://localhost:8000`.
 
 Interactive docs: `http://localhost:8000/docs`
 
@@ -198,9 +198,10 @@ python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activa
 pip install -r requirements-dev.txt               # runtime deps + dev tools (Python 3.11)
 
 cp .env.example .env    # then set DATABASE_URL to your PostgreSQL
-alembic upgrade head
-uvicorn app.main:app --reload
+python -m app.serve     # runs the migrations, then the server
 ```
+
+For development with auto-reload (demo mode off only): `alembic upgrade head && uvicorn app.main:app --reload`.
 
 ---
 
@@ -263,7 +264,8 @@ The default `check_interval` for a new service (60 seconds) is fixed in code, no
 
 | Variable | Default | Description |
 |---|---|---|
-| `PORT` | `8000` | Port uvicorn listens on inside the API container (used by the Dockerfile `CMD` and `HEALTHCHECK`) |
+| `PORT` | `8000` | Port the server listens on, read by `python -m app.serve` (1–65535) and by the Dockerfile `HEALTHCHECK` |
+| `WEB_CONCURRENCY` | `1` | Number of server worker processes, read by uvicorn as before. Must be 1 (or unset) in demo mode |
 
 With `docker compose`, the API container's `DATABASE_URL` is set in `docker-compose.yml` and overrides the value from `.env`.
 
@@ -271,7 +273,7 @@ With `docker compose`, the API container's `DATABASE_URL` is set in `docker-comp
 
 ## Running a public demo
 
-> **Not ready for public use yet.** Demo mode (spec 003a) gives you protected example services and capped visitor writes. A public deployment also needs rate limiting (spec 003b), a periodic reset of visitor data (003c) and a single-process lock (003d), which are not implemented yet.
+> **Not ready for public use yet.** Demo mode gives you protected example services and capped visitor writes (spec 003a) in a single enforced process (spec 003d). A public deployment also needs rate limiting (spec 003b) and a periodic reset of visitor data (003c), which are not implemented yet.
 
 Turn it on in `.env` and list the example services:
 
@@ -297,6 +299,25 @@ What changes while it is on:
 - Visitors can create services (default interval 300 s), and change or delete those visitor services. Caps return `409`, an interval below the minimum returns `422`.
 
 Full reference, including the error order and edge cases: [docs/architecture.md §7](docs/architecture.md#7-demo-mode-spec-003a).
+
+### One process only
+
+Demo mode must be started with `python -m app.serve` (the container does this); any other start, auto-reload or more than one worker is refused. The start command takes a PostgreSQL lock before migrating, so only one process per database runs demo mode:
+
+- A second process waits up to `DEMO_LOCK_WAIT_SECONDS` for the first to stop, then refuses. On platforms that start the new version before stopping the old one, use a stop-first (recreate) deploy.
+- `WEB_CONCURRENCY` must be 1 or unset (some platforms set it), and the database must be PostgreSQL reached directly, not through a transaction-pooling proxy.
+- If the lock is lost (database restart, network failure), the process exits with status 1 within the heartbeat timeout plus 2 seconds and the platform restarts it. The old process may overlap a new one by up to heartbeat interval + timeout + 2 s.
+- Worst-case startup is about 157 s with the defaults; the container's healthcheck start period is 180 s.
+
+| Variable | Default | Description |
+|---|---|---|
+| `DEMO_LOCK_WAIT_SECONDS` | `60` | How long a second process waits for the lock (0–3600; 0 = one attempt) |
+| `DEMO_LOCK_HEARTBEAT_SECONDS` | `10` | How often the lock is confirmed (1–300) |
+| `DEMO_LOCK_TIMEOUT_SECONDS` | `5` | Heartbeat timeout (1–60, below the heartbeat interval) |
+| `DEMO_LOCK_KEEPALIVE_SECONDS` | `30` | The database notices a dead lock connection within this time (10–600) |
+| `DEMO_LOCK_NAME` | `service-monitoring-api-demo` | Lock name; use different names when staging and production share a database |
+
+Full reference, including messages and exit statuses: [docs/architecture.md §8](docs/architecture.md#8-single-process-and-start-command-spec-003d).
 
 ---
 

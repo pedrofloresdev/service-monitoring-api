@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.v1 import PREFIX as V1_PREFIX
 from app.api.v1 import metrics, services, status
-from app.core import demo_settings
+from app.core import demo_settings, runtime
 from app.core.config import settings
 from app.core.demo_settings import load_demo_config
 from app.services.demo_seeding import seed_at_startup, validate_seed_urls
@@ -24,6 +24,8 @@ logging.basicConfig(
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Any exception here fails the lifespan startup, so the server refuses to start.
     if settings.demo_mode:
+        if not runtime.started_by_serve():  # spec 003d RF-2, before any demo step
+            raise RuntimeError(runtime.START_COMMAND_MESSAGE)
         config = load_demo_config()  # every invalid setting at once (spec 003a RF-3)
         validate_seed_urls(config)  # RF-4
         first_check_ids = seed_at_startup(config)  # one transaction (RF-5 to RF-7)

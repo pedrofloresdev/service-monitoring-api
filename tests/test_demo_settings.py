@@ -1,4 +1,4 @@
-"""Demo-mode settings (spec 003a RF-1 to RF-3)."""
+"""Demo-mode settings (spec 003a RF-1 to RF-3; spec 003d lock settings and RF-4 step 2)."""
 
 import os
 import subprocess
@@ -9,7 +9,14 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.config import Settings
-from app.core.demo_settings import DemoConfig, DemoConfigError, load_demo_config
+from app.core.demo_settings import (
+    DemoConfig,
+    DemoConfigError,
+    LockConfig,
+    load_demo_config,
+    load_lock_config,
+    validate_demo_settings,
+)
 from app.services.demo_rules import SeedDefinition
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -20,6 +27,11 @@ DEMO_VARS = (
     "DEMO_GLOBAL_VISITOR_CAP",
     "DEMO_PER_HOST_VISITOR_CAP",
     "DEMO_MIN_CHECK_INTERVAL_SECONDS",
+    "DEMO_LOCK_WAIT_SECONDS",
+    "DEMO_LOCK_HEARTBEAT_SECONDS",
+    "DEMO_LOCK_TIMEOUT_SECONDS",
+    "DEMO_LOCK_KEEPALIVE_SECONDS",
+    "DEMO_LOCK_NAME",
 )
 
 
@@ -71,6 +83,9 @@ class TestDemoModeFlag:
                 "DEMO_GLOBAL_VISITOR_CAP": "lots",
                 "DEMO_PER_HOST_VISITOR_CAP": "-1",
                 "DEMO_MIN_CHECK_INTERVAL_SECONDS": "5.5",
+                "DEMO_LOCK_WAIT_SECONDS": "-1",
+                "DEMO_LOCK_TIMEOUT_SECONDS": "99",
+                "DEMO_LOCK_NAME": "bad name!",
             }
         )
         assert result.returncode == 0, result.stderr
@@ -114,6 +129,95 @@ class TestLoadDemoConfig:
         with pytest.raises(DemoConfigError) as exc:
             load_demo_config()
         assert "DEMO_SEED_SERVICES" in str(exc.value)
+
+
+class TestLockSettings:
+    def test_defaults(self) -> None:
+        assert load_lock_config() == LockConfig(
+            wait=60, heartbeat=10, timeout=5, keepalive=30, name="service-monitoring-api-demo"
+        )
+
+    def test_custom_values(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for name, value in {
+            "DEMO_LOCK_WAIT_SECONDS": "0",
+            "DEMO_LOCK_HEARTBEAT_SECONDS": "2",
+            "DEMO_LOCK_TIMEOUT_SECONDS": "1",
+            "DEMO_LOCK_KEEPALIVE_SECONDS": "600",
+            "DEMO_LOCK_NAME": "Staging_demo-2",
+        }.items():
+            monkeypatch.setenv(name, value)
+        assert load_lock_config() == LockConfig(0, 2, 1, 600, "Staging_demo-2")
+
+    @pytest.mark.parametrize(
+        ("name", "raw"),
+        [
+            ("DEMO_LOCK_WAIT_SECONDS", "3601"),
+            ("DEMO_LOCK_WAIT_SECONDS", "+5"),
+            ("DEMO_LOCK_HEARTBEAT_SECONDS", "0"),
+            ("DEMO_LOCK_HEARTBEAT_SECONDS", "301"),
+            ("DEMO_LOCK_TIMEOUT_SECONDS", "0"),
+            ("DEMO_LOCK_TIMEOUT_SECONDS", "61"),
+            ("DEMO_LOCK_KEEPALIVE_SECONDS", "9"),
+            ("DEMO_LOCK_KEEPALIVE_SECONDS", "601"),
+            ("DEMO_LOCK_KEEPALIVE_SECONDS", "30.0"),
+        ],
+    )
+    def test_out_of_range_or_not_digits(
+        self, monkeypatch: pytest.MonkeyPatch, name: str, raw: str
+    ) -> None:
+        monkeypatch.setenv(name, raw)
+        if name == "DEMO_LOCK_TIMEOUT_SECONDS":
+            monkeypatch.setenv("DEMO_LOCK_HEARTBEAT_SECONDS", "300")
+        with pytest.raises(DemoConfigError) as exc:
+            load_lock_config()
+        assert len(exc.value.errors) == 1 and exc.value.errors[0].startswith(f"{name}: ")
+
+    @pytest.mark.parametrize("raw", ["", "a" * 101, "has space", "dot.name", "bücher"])
+    def test_invalid_lock_name(self, monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
+        monkeypatch.setenv("DEMO_LOCK_NAME", raw)
+        with pytest.raises(DemoConfigError) as exc:
+            load_lock_config()
+        assert exc.value.errors == [
+            "DEMO_LOCK_NAME: must be 1 to 100 characters of letters, digits, '-' and '_'"
+        ]
+
+    def test_lock_name_of_100_characters_is_valid(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DEMO_LOCK_NAME", "a" * 100)
+        assert load_lock_config().name == "a" * 100
+
+    @pytest.mark.parametrize("timeout", ["10", "11"])
+    def test_timeout_must_be_below_heartbeat(
+        self, monkeypatch: pytest.MonkeyPatch, timeout: str
+    ) -> None:
+        monkeypatch.setenv("DEMO_LOCK_TIMEOUT_SECONDS", timeout)
+        with pytest.raises(DemoConfigError) as exc:
+            load_lock_config()
+        assert exc.value.errors == [
+            f"DEMO_LOCK_TIMEOUT_SECONDS ({timeout}) must be less than "
+            "DEMO_LOCK_HEARTBEAT_SECONDS (10)"
+        ]
+
+
+class TestValidateDemoSettings:
+    def test_returns_both_configs(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DEMO_SEED_SERVICES", SEED)
+        demo, lock = validate_demo_settings()
+        assert demo.global_cap == 20 and lock.name == "service-monitoring-api-demo"
+
+    def test_reports_003a_and_003d_errors_together(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DEMO_GLOBAL_VISITOR_CAP", "0")
+        monkeypatch.setenv("DEMO_LOCK_WAIT_SECONDS", "x")
+        monkeypatch.setenv("DEMO_LOCK_NAME", "bad name")
+        with pytest.raises(DemoConfigError) as exc:
+            validate_demo_settings()
+        prefixes = [error.split(":")[0] for error in exc.value.errors]
+        assert prefixes == [
+            "DEMO_SEED_SERVICES",
+            "DEMO_GLOBAL_VISITOR_CAP",
+            "DEMO_LOCK_WAIT_SECONDS",
+            "DEMO_LOCK_NAME",
+        ]
+        assert str(exc.value).startswith("Invalid demo settings:")
 
 
 def test_env_example_lists_exactly_the_settings_read() -> None:
