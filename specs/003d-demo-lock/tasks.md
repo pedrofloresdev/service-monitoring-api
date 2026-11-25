@@ -25,7 +25,7 @@ Rules for every task:
     - The plan change is committed.
     - No project code is changed.
 
-- [ ] **T2. Pure lock rules, test first.** Write `tests/test_demo_lock_rules.py` first, then `app/services/demo_lock_rules.py` (plan §6): `parse_web_concurrency`, `parse_port`, `lock_key`, `split_key`, `keepalive_settings`, `merge_options`, `connect_kwargs`, `lock_database`, `classify_connect_error`, `public_reason`. RF-3, RF-5, RF-6
+- [x] **T2. Pure lock rules, test first.** Write `tests/test_demo_lock_rules.py` first, then `app/services/demo_lock_rules.py` (plan §6): `parse_web_concurrency`, `parse_port`, `lock_key`, `split_key`, `keepalive_settings`, `merge_options`, `connect_kwargs`, `lock_database`, `classify_connect_error`, `public_reason`. RF-3, RF-5, RF-6
   - Done when:
     - The tests failed first and pass after.
     - `WEB_CONCURRENCY` cases: unset, empty, `1`, `2`, `0`, `+1`, `1.0`, ` 1`, non-ASCII digits. `PORT` cases: unset, `0`, `65536`, `8000`.
