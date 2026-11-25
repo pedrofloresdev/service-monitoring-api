@@ -121,6 +121,8 @@ A URL that points to a non-public address returns **422**. A URL already used by
 }
 ```
 
+A create or update that would give two services the same URL returns `409` (`"A service with this URL already exists"`). Setting a field to `null` in `PATCH` returns `422`.
+
 ---
 
 ### Metrics
@@ -240,11 +242,13 @@ Every change follows Spec-Driven Development: an approved spec in `specs/NNN-nam
 
 Migration `a62134b6f191` (spec 001) fixes a bug where checks were stored without a timestamp on PostgreSQL. It **deletes** those legacy metrics, because their real time is unknown and they could not be shown, and logs how many it deleted (`Deleted N legacy metric(s) with NULL checked_at`). Back up the database before running `alembic upgrade head`. If any metric has an empty or invalid status, the migration stops without changing anything.
 
+Migration `30fbc6a1211a` (spec 003a) adds the `services.origin` column used by demo mode. Existing services become `ordinary`; no data is removed.
+
 ---
 
 ## Configuration
 
-All settings are loaded from `.env` via `pydantic-settings`. `.env.example` lists exactly these.
+All settings are loaded from `.env` via `pydantic-settings`. `.env.example` lists exactly these, plus the demo-mode settings in [Running a public demo](#running-a-public-demo).
 
 | Variable | Default | Description |
 |---|---|---|
@@ -262,6 +266,37 @@ The default `check_interval` for a new service (60 seconds) is fixed in code, no
 | `PORT` | `8000` | Port uvicorn listens on inside the API container (used by the Dockerfile `CMD` and `HEALTHCHECK`) |
 
 With `docker compose`, the API container's `DATABASE_URL` is set in `docker-compose.yml` and overrides the value from `.env`.
+
+---
+
+## Running a public demo
+
+> **Not ready for public use yet.** Demo mode (spec 003a) gives you protected example services and capped visitor writes. A public deployment also needs rate limiting (spec 003b), a periodic reset of visitor data (003c) and a single-process lock (003d), which are not implemented yet.
+
+Turn it on in `.env` and list the example services:
+
+```bash
+DEMO_MODE=true
+DEMO_SEED_SERVICES=[{"name": "Example", "url": "https://example.com/", "check_interval": 60}]
+```
+
+| Variable | Default | Description |
+|---|---|---|
+| `DEMO_MODE` | off | `true`/`false` (also `1`/`0`, `yes`/`no`, `on`/`off`). Any other value stops startup |
+| `DEMO_SEED_SERVICES` | required | JSON array of 1–20 services: `name`, `url`, optional `expected_status` and `check_interval` |
+| `DEMO_GLOBAL_VISITOR_CAP` | `20` | Visitor services allowed at once (1–1000) |
+| `DEMO_PER_HOST_VISITOR_CAP` | `3` | Visitor services allowed per host (1–1000, at most the global cap) |
+| `DEMO_MIN_CHECK_INTERVAL_SECONDS` | `300` | Minimum check interval for visitor services, also their default (10–86400) |
+
+The `DEMO_*` settings are read only while demo mode is on; any invalid value stops startup with a message naming it.
+
+What changes while it is on:
+
+- The seed services are created (or adopted, if their URL already exists) at startup and checked immediately. They return `403` on `PATCH` and `DELETE`. Their history comes only from real checks.
+- Every other existing service is protected too (`403`), so nothing you registered before can be changed by visitors.
+- Visitors can create services (default interval 300 s), and change or delete those visitor services. Caps return `409`, an interval below the minimum returns `422`.
+
+Full reference, including the error order and edge cases: [docs/architecture.md §7](docs/architecture.md#7-demo-mode-spec-003a).
 
 ---
 

@@ -1,0 +1,746 @@
+{
+  "components": {
+    "schemas": {
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "MetricResponse": {
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "response_time_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Time Ms"
+          },
+          "service_id": {
+            "title": "Service Id",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "status_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Code"
+          }
+        },
+        "required": [
+          "id",
+          "service_id",
+          "status",
+          "status_code",
+          "response_time_ms",
+          "error_message",
+          "checked_at"
+        ],
+        "title": "MetricResponse",
+        "type": "object"
+      },
+      "MetricsPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MetricResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "service_id": {
+            "title": "Service Id",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "service_id",
+          "total",
+          "limit",
+          "offset",
+          "items"
+        ],
+        "title": "MetricsPage",
+        "type": "object"
+      },
+      "ServiceCreate": {
+        "properties": {
+          "check_interval": {
+            "default": 60,
+            "description": "Interval in seconds",
+            "maximum": 86400.0,
+            "minimum": 10.0,
+            "title": "Check Interval",
+            "type": "integer"
+          },
+          "expected_status": {
+            "default": 200,
+            "maximum": 599.0,
+            "minimum": 100.0,
+            "title": "Expected Status",
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "url": {
+            "description": "http(s) URL to check. Must point to a public address: loopback, private, link-local (including cloud metadata 169.254.169.254), reserved and other non-public IPv4/IPv6 ranges, and localhost / *.localhost are rejected with 422 (type url_not_allowed). Hostnames are resolved on create/update and again before every check; a check whose destination is unsafe or does not resolve is stored as DOWN without sending a request. Checks do not follow redirects or use proxies.",
+            "format": "uri",
+            "maxLength": 2083,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "url"
+        ],
+        "title": "ServiceCreate",
+        "type": "object"
+      },
+      "ServiceResponse": {
+        "properties": {
+          "check_interval": {
+            "title": "Check Interval",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expected_status": {
+            "title": "Expected Status",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "url",
+          "expected_status",
+          "check_interval",
+          "is_active",
+          "created_at"
+        ],
+        "title": "ServiceResponse",
+        "type": "object"
+      },
+      "ServiceStatusEntry": {
+        "properties": {
+          "avg_response_time_ms": {
+            "title": "Avg Response Time Ms",
+            "type": "number"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "uptime_last_24h": {
+            "title": "Uptime Last 24H",
+            "type": "number"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "url",
+          "status",
+          "avg_response_time_ms",
+          "uptime_last_24h"
+        ],
+        "title": "ServiceStatusEntry",
+        "type": "object"
+      },
+      "ServiceUpdate": {
+        "properties": {
+          "check_interval": {
+            "anyOf": [
+              {
+                "maximum": 86400.0,
+                "minimum": 10.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Check Interval"
+          },
+          "expected_status": {
+            "anyOf": [
+              {
+                "maximum": 599.0,
+                "minimum": 100.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Status"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "format": "uri",
+                "maxLength": 2083,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "http(s) URL to check. Must point to a public address: loopback, private, link-local (including cloud metadata 169.254.169.254), reserved and other non-public IPv4/IPv6 ranges, and localhost / *.localhost are rejected with 422 (type url_not_allowed). Hostnames are resolved on create/update and again before every check; a check whose destination is unsafe or does not resolve is stored as DOWN without sending a request. Checks do not follow redirects or use proxies.",
+            "title": "Url"
+          }
+        },
+        "title": "ServiceUpdate",
+        "type": "object"
+      },
+      "SystemStatus": {
+        "properties": {
+          "down": {
+            "title": "Down",
+            "type": "integer"
+          },
+          "services": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceStatusEntry"
+            },
+            "title": "Services",
+            "type": "array"
+          },
+          "total_services": {
+            "title": "Total Services",
+            "type": "integer"
+          },
+          "up": {
+            "title": "Up",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_services",
+          "up",
+          "down",
+          "services"
+        ],
+        "title": "SystemStatus",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Monitor external and internal services, track uptime, and get real-time observability.",
+    "title": "Service Monitoring API",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/": {
+      "get": {
+        "operationId": "root__get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Root",
+        "tags": [
+          "root"
+        ]
+      }
+    },
+    "/api/v1/metrics/services/{service_id}": {
+      "get": {
+        "operationId": "get_service_metrics_api_v1_metrics_services__service_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_id",
+            "required": true,
+            "schema": {
+              "title": "Service Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Restrict to last N hours",
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 8760,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Restrict to last N hours",
+              "title": "Hours"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricsPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Service Metrics",
+        "tags": [
+          "metrics"
+        ]
+      }
+    },
+    "/api/v1/services": {
+      "get": {
+        "operationId": "list_services_api_v1_services_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "active_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Active Only",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ServiceResponse"
+                  },
+                  "title": "Response List Services Api V1 Services Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Services",
+        "tags": [
+          "services"
+        ]
+      },
+      "post": {
+        "operationId": "create_service_api_v1_services_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Service",
+        "tags": [
+          "services"
+        ]
+      }
+    },
+    "/api/v1/services/{service_id}": {
+      "delete": {
+        "operationId": "delete_service_api_v1_services__service_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_id",
+            "required": true,
+            "schema": {
+              "title": "Service Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Service",
+        "tags": [
+          "services"
+        ]
+      },
+      "get": {
+        "operationId": "get_service_api_v1_services__service_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_id",
+            "required": true,
+            "schema": {
+              "title": "Service Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Service",
+        "tags": [
+          "services"
+        ]
+      },
+      "patch": {
+        "operationId": "update_service_api_v1_services__service_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_id",
+            "required": true,
+            "schema": {
+              "title": "Service Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Service",
+        "tags": [
+          "services"
+        ]
+      }
+    },
+    "/api/v1/status": {
+      "get": {
+        "operationId": "status_api_v1_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Status",
+        "tags": [
+          "status"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "root"
+        ]
+      }
+    }
+  }
+}

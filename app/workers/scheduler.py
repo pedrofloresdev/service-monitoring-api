@@ -1,4 +1,6 @@
 import logging
+from collections.abc import Sequence
+from datetime import UTC, datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -36,7 +38,24 @@ def unschedule_service(service_id: int) -> None:
         logger.info("Unscheduled service %d", service_id)
 
 
-def start_scheduler() -> None:
+def schedule_first_check(service_id: int) -> None:
+    """One-off immediate check, exempt from the lateness cutoff (spec 003a RF-8).
+
+    misfire_grace_time=None means "run no matter how late", so it is never skipped while it
+    waits for a free worker. Interval jobs keep the scheduler defaults (RNF-1).
+    """
+    scheduler.add_job(
+        check_service_by_id,
+        trigger="date",
+        run_date=datetime.now(UTC),
+        id=f"first_check_{service_id}",
+        args=[service_id],
+        misfire_grace_time=None,
+        replace_existing=True,
+    )
+
+
+def start_scheduler(first_check_ids: Sequence[int] = ()) -> None:
     db = SessionLocal()
     try:
         active_services = db.query(Service).filter(Service.is_active).all()
@@ -46,6 +65,8 @@ def start_scheduler() -> None:
     finally:
         db.close()
 
+    for service_id in first_check_ids:
+        schedule_first_check(service_id)
     scheduler.start()
 
 

@@ -120,10 +120,12 @@ class TestAcceptedLiterals:
         assert resp.status_code == 201
         assert fake_resolver.calls == []
 
-    def test_update_with_null_url_is_not_classified(self, client: TestClient) -> None:
-        # `url: null` is a pre-existing gap (spec 002 Out of scope); the validator skips None.
+    def test_update_with_null_url_is_a_validation_error(self, client: TestClient) -> None:
+        # Spec 002 left `url: null` as a known gap; spec 003a RF-19 closes it. The 422 comes
+        # from request validation, so it wins over the 404 for an unknown id (003a RF-16).
         resp = client.patch(f"{BASE}/9999", json={"name": "x", "url": None})
-        assert resp.status_code == 404
+        assert resp.status_code == 422
+        assert resp.json()["detail"][0]["type"] == "null_not_allowed"
 
 
 # ---------------------------------------------------------------------------
