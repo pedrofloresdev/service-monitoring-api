@@ -89,7 +89,7 @@ Rules for every task:
 
     All quality checks are green.
 
-- [ ] **T8. PostgreSQL tests in real processes.** Add `tests/postgres/lock_holder.py`, the stand-in server entry point (plan D10), and `tests/postgres/test_demo_lock.py` (plan §10 PostgreSQL column), with heartbeat 2 s and timeout 1 s. RNF-4, RF-5, RF-6, RF-7, RF-7a, RF-1 (logging)
+- [x] **T8. PostgreSQL tests in real processes.** Add `tests/postgres/lock_holder.py`, the stand-in server entry point (plan D10), and `tests/postgres/test_demo_lock.py` (plan §10 PostgreSQL column), with heartbeat 2 s and timeout 1 s. RNF-4, RF-5, RF-6, RF-7, RF-7a, RF-1 (logging)
   - Done when `pytest -m postgres --no-cov` passes, including:
     - wait then refuse, takeover after the first stops, and wait 0;
     - a stop signal during the wait exits 0 within 1.5 s;
