@@ -13,7 +13,7 @@ Rules for every task:
 
 ## Tasks
 
-- [ ] **T1. Verify the PostgreSQL facts (scratch only).** On PostgreSQL 15 (`docker compose up -d db`), run a scratch script, not committed, that checks the plan §1 facts:
+- [x] **T1. Verify the PostgreSQL facts (scratch only).** On PostgreSQL 15 (`docker compose up -d db`), run a scratch script, not committed, that checks the plan §1 facts:
   - how a `bigint` advisory lock appears in `pg_locks` (`classid`, `objid`, `objsubid`);
   - `tcp_keepalives_*` set through `options` and read with `SHOW` over TCP;
   - psycopg2 keyword `options` replacing the URL's `options`;
