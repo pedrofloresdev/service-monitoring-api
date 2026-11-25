@@ -1,6 +1,6 @@
 # Validation - 003d Demo mode: project start command and single-process lock
 
-**Verdict: FULFILLED PENDING CI.**
+**Verdict (2026-11-25): SPEC FULFILLED.** CI: PR #9 run 45721830959 on `55b406e`, all 5 checks pass (lint, format, typecheck, test, migrations).
 - `/sdd-validate` (reviewer on Sonnet, 2026-11-25): every RF and RNF is covered by passing tests. The reviewer re-ran all the checks and the real `python -m app.serve` against PostgreSQL. It found no spec violation and no doc mismatch.
 - Five non-blocking findings. Finding 1 is fixed in the commit after `9aed7f7`: the "lock lost" callbacks now run in parallel within the 1 s budget, so a slow "stop demo jobs" can't keep the migration-child kill from running (RF-7). New test: `test_a_hanging_callback_does_not_stop_a_later_one`. Findings 2 to 5 are accepted:
   - a stop signal in the tiny window just before the server installs its handlers is dropped, and Docker's grace period ends the process;
@@ -32,7 +32,7 @@ Commits:
 | Migrations run only after the lock is taken | PASS | `tests/test_serve.py::test_steps_in_order_with_demo_options` checks the step order: settings → lock → heartbeat → migrations → server. `test_second_process_waits_then_refuses` asserts the refused process never logs `Running migrations`. Compose logs show `Demo lock acquired` before `Running migrations` |
 | Ending the holder's lock connection makes it exit within the heartbeat bound, and a restart retakes the lock | PASS | `test_holder_exits_1_when_lock_connection_terminated_and_restart_retakes`: `pg_terminate_backend` on the lock connection → exit 1 within interval 2 s + timeout 1 s + 2 s, then a new process gets `READY`. `test_watchdog_ends_a_hanging_heartbeat`: a `pg_sleep(30)` heartbeat → exit 1 within the bound, logging `heartbeat timed out after 1 s` |
 | `WEB_CONCURRENCY` above 1, a non-PostgreSQL database and a start through another command each refuse with the documented message | PASS | `tests/test_serve.py` checks each refusal with its exact text: `Demo mode requires a single process (WEB_CONCURRENCY=2)`, invalid values, and `Demo mode requires PostgreSQL`. `tests/test_demo_startup.py::test_demo_mode_without_the_marker_refuses_before_any_demo_step` covers a start without the marker. Compose: `WEB_CONCURRENCY=2` → the exact error; `uvicorn app.main:app` in the image → `RuntimeError: Demo mode must be started with the project start command (python -m app.serve)`, then `Application startup failed` |
-| Docs updated per RF-10; quality checks green in CI | PASS (docs, local), PENDING (CI) | Docs: `docs/architecture.md` §8 covers the start command, order, marker, messages and exit statuses, the lock, key and name, connection options, keepalive, heartbeat and watchdog, hard exit, lock status, the known overlap limit, settings, PostgreSQL directly, `WEB_CONCURRENCY`, stop-first deploys, and the 157 s worst case with the 180 s start period. Also updated: architecture §2 and §7, `README.md` (run commands, the "One process only" section, `PORT` and `WEB_CONCURRENCY` rows), `AGENTS.md` Run line, `docs/SPEC.md` scope line, `.env.example`. Local: `ruff check .` clean, `ruff format --check .` 103 files, `mypy` reports no issues in 63 files, `pytest` 678 passed with coverage 97.23% (floor 88), `python -m tools.schema_check` reports no differences, `pytest -m postgres --no-cov` 33 passed |
+| Docs updated per RF-10; quality checks green in CI | PASS | Docs: `docs/architecture.md` §8 covers the start command, order, marker, messages and exit statuses, the lock, key and name, connection options, keepalive, heartbeat and watchdog, hard exit, lock status, the known overlap limit, settings, PostgreSQL directly, `WEB_CONCURRENCY`, stop-first deploys, and the 157 s worst case with the 180 s start period. Also updated: architecture §2 and §7, `README.md` (run commands, the "One process only" section, `PORT` and `WEB_CONCURRENCY` rows), `AGENTS.md` Run line, `docs/SPEC.md` scope line, `.env.example`. Local: `ruff check .` clean, `ruff format --check .` 103 files, `mypy` reports no issues in 63 files, `pytest` 678 passed with coverage 97.23% (floor 88), `python -m tools.schema_check` reports no differences, `pytest -m postgres --no-cov` 33 passed |
 
 ## Requirements
 
@@ -55,7 +55,7 @@ Commits:
 | RNF-4 | PASS | 13 PostgreSQL tests in `tests/postgres/test_demo_lock.py` |
 | RNF-5 | PASS | Plan §12 approved on 2026-11-25 |
 | RNF-6 | PASS | Injected clock in `TestAcquire`; 1 s timeouts and 2 s heartbeats elsewhere; defaults never used for timing |
-| RNF-7 | PASS (local), PENDING (CI) | Checks above |
+| RNF-7 | PASS | Checks above; CI green on PR #9 |
 
 ## Notes
 
@@ -65,4 +65,4 @@ Commits:
 
 ## Pending
 
-1. CI green on the PR; tick T10.
+None. Merge PR #9 (owner).

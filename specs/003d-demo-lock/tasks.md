@@ -111,7 +111,7 @@ Rules for every task:
 
     Results are recorded for T10.
 
-- [ ] **T10. Docs and validation.** Update:
+- [x] **T10. Docs and validation.** Update:
   - `docs/architecture.md`: new §8 "Single process (spec 003d)", a pointer from §2, and the trade-offs moved to §9;
   - `README.md`: run commands, a public-demo summary, lock settings, deploys, `WEB_CONCURRENCY` and the `PORT` row;
   - `AGENTS.md`: the `Run` line;
