@@ -46,7 +46,7 @@ Rules for every task:
     - The `.env.example` test passes.
     - All quality checks are green.
 
-- [ ] **T4. Start marker and lock status entry point.** Add `app/core/runtime.py` (plan §3, §4.3). Add the lifespan check that refuses demo mode without the marker, before any 003a step (plan §7.6). Tests first in `tests/test_demo_startup.py`, where the existing demo lifespan tests set the marker through a fixture. RF-2, RF-7a (entry point), RF-8
+- [x] **T4. Start marker and lock status entry point.** Add `app/core/runtime.py` (plan §3, §4.3). Add the lifespan check that refuses demo mode without the marker, before any 003a step (plan §7.6). Tests first in `tests/test_demo_startup.py`, where the existing demo lifespan tests set the marker through a fixture. RF-2, RF-7a (entry point), RF-8
   - Done when these tests pass:
     - demo mode on without the marker raises the exact RF-2 message, and `load_demo_config` is not called;
     - with the marker it starts;

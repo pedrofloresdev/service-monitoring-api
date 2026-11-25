@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core import config as config_module
-from app.core import demo_settings
+from app.core import demo_settings, runtime
 from app.core.demo_settings import DemoConfig, DemoConfigError
 from app.db.base import Base
 from app.db.models.metrics import Metric
@@ -209,6 +209,7 @@ class TestLifespan:
         from app import main
 
         started: dict[str, Any] = {}
+        monkeypatch.setattr(runtime, "_started_by_serve", True)  # spec 003d RF-2
         monkeypatch.setattr(config_module.settings, "DEMO_MODE", "true")
         monkeypatch.setattr(main, "load_demo_config", lambda: _config(_seed("https://a.example/")))
         monkeypatch.setattr(main, "validate_seed_urls", lambda config: None)
@@ -232,3 +233,63 @@ class TestLifespan:
 
         with pytest.raises(RuntimeError, match="seeding failed"):
             self._run(monkeypatch, fail)
+
+
+# ---------------------------------------------------------------------------
+# Spec 003d RF-2, RF-7a, RF-8: start marker and lock status
+# ---------------------------------------------------------------------------
+
+
+class TestStartMarker:
+    def test_demo_mode_without_the_marker_refuses_before_any_demo_step(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app import main
+
+        monkeypatch.setattr(runtime, "_started_by_serve", False)
+        monkeypatch.setattr(config_module.settings, "DEMO_MODE", "true")
+        loaded: list[bool] = []
+        monkeypatch.setattr(main, "load_demo_config", lambda: loaded.append(True))
+        monkeypatch.setattr(main, "start_scheduler", lambda **kw: None)
+        monkeypatch.setattr(main, "stop_scheduler", lambda: None)
+        with pytest.raises(RuntimeError) as exc:
+            with TestClient(main.app):
+                pass
+        assert str(exc.value) == (
+            "Demo mode must be started with the project start command (python -m app.serve)"
+        )
+        assert loaded == []
+
+    def test_demo_mode_off_ignores_the_marker(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from app import main
+
+        monkeypatch.setattr(runtime, "_started_by_serve", False)
+        monkeypatch.setattr(config_module.settings, "DEMO_MODE", "false")
+        started: list[bool] = []
+        monkeypatch.setattr(main, "start_scheduler", lambda **kw: started.append(True))
+        monkeypatch.setattr(main, "stop_scheduler", lambda: None)
+        with TestClient(main.app):
+            pass
+        assert started == [True]
+
+    def test_mark_started_by_serve(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(runtime, "_started_by_serve", False)
+        assert runtime.started_by_serve() is False
+        runtime.mark_started_by_serve()
+        assert runtime.started_by_serve() is True
+
+
+class TestLockStatus:
+    def test_no_lock_is_not_held(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(runtime, "_demo_lock", None)
+        assert runtime.demo_lock_is_held() is False
+
+    @pytest.mark.parametrize("held", [True, False])
+    def test_asks_the_lock(self, monkeypatch: pytest.MonkeyPatch, held: bool) -> None:
+        class FakeLock:
+            def is_held(self) -> bool:
+                return held
+
+        monkeypatch.setattr(runtime, "_demo_lock", None)
+        runtime.set_demo_lock(FakeLock())
+        assert runtime.demo_lock_is_held() is held
